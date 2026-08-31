@@ -1,4 +1,4 @@
-<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4f95c206-c7d5-4213-a1dd-2109dbefbbee" /># ANAMNESIS
+
 
 ### Digital Crime-Scene Intelligence for Manipulated Media
 
