@@ -1,4 +1,4 @@
-# ANAMNESIS
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/4f95c206-c7d5-4213-a1dd-2109dbefbbee" /># ANAMNESIS
 
 ### Digital Crime-Scene Intelligence for Manipulated Media
 
@@ -10,7 +10,8 @@ Anamnesis is an investigator-assistance platform designed to help analyse suspic
 
 ## 🚀 Live Prototype
 
-[Open Anamnesis]((https://anamnesis-media-forensics-engine-303426704079.asia-southeast1.run.app))
+[Open Anamnesis]
+https://anamnesis-media-forensics-engine-303426704079.asia-southeast1.run.app
 
 ## 🚨 Problem
 
