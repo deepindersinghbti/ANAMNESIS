@@ -1,0 +1,6 @@
+{
+  "name": "ANAMNESIS — Media Forensics Engine",
+  "description": "Advanced digital crime-scene media forensics engine reconstructing lineage, exposing manipulation, and decoupling raw media from deceptive narrative context across the 5 forensic questions.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
