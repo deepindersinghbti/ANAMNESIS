@@ -185,6 +185,12 @@ export interface MediaIntakeData {
   sourceUrl?: string;
   exifData?: Record<string, string | number | boolean>;
   uploadTimestamp: string;
+  /**
+   * True when this intake came from a Demo Mode fixture rather than a file
+   * the investigator supplied. The UI must badge it for the whole life of
+   * the case, so a reference case is never mistaken for a live result.
+   */
+  isPrecomputed?: boolean;
 }
 
 export interface ForensicFilterMode {
@@ -349,6 +355,8 @@ export interface SavedCase {
 }
 
 export interface BenchmarkCase {
+  /** Always true. Demo Mode fixtures are never live results. */
+  isPrecomputed: true;
   id: string;
   title: string;
   category: 'False Narrative / Recycled' | 'Deepfake / Synthetic AI' | 'Pixel Tampered / Spliced' | 'Audio-Visual Desync';

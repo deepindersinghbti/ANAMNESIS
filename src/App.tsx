@@ -593,6 +593,22 @@ export default function App() {
               </div>
             )}
 
+            {/* Demo Mode. A precomputed reference case is labelled wherever
+                it is shown, not just on the step that loaded it. */}
+            {caseState.ingest.isPrecomputed && (
+              <div className="rounded-2xl border border-amber-500/50 bg-amber-950/40 p-3 flex items-center gap-3 text-amber-200 font-mono text-xs shadow-lg">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <div className="flex-1">
+                  <strong className="block text-amber-100">PRECOMPUTED REFERENCE CASE</strong>
+                  <span className="text-amber-300/90 font-sans">
+                    These findings are a stored fixture used to demonstrate the
+                    workflow offline. They were not produced by analysing a file
+                    you supplied.
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Analysis in flight. Real request, real 30s abort, cancellable. */}
             {isAnalysing && (
               <div className="rounded-2xl border border-purple-500/50 bg-purple-950/40 p-4 flex items-center gap-3 text-purple-200 font-mono text-xs shadow-lg">

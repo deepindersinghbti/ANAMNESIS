@@ -51,6 +51,10 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
   const [sourcePlatform, setSourcePlatform] = useState(initialIntake?.sourcePlatform || '');
   const [sourceUrl, setSourceUrl] = useState(initialIntake?.sourceUrl || '');
   const [isPrecomputed, setIsPrecomputed] = useState(false);
+  /* The fixture's own evidence id. App matches on it to find the stored
+   * report, so a Demo Mode case must submit the benchmark's id and not a
+   * freshly generated one. */
+  const [presetEvidenceId, setPresetEvidenceId] = useState<string>('');
 
   const [isDragging, setIsDragging] = useState(false);
   const [isComputingHash, setIsComputingHash] = useState(false);
@@ -91,6 +95,9 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
     }
 
     setIntakeError(null);
+    setIsPrecomputed(false);
+    setSelectedBenchmarkId('');
+    setPresetEvidenceId('');
     setFileName(file.name);
     setFileSize(file.size);
     // G17: the server must not have to guess the mime type.
@@ -149,6 +156,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
        * fixtures, not photographs, and the case must never be mistaken for
        * a live result. */
       setIsPrecomputed(true);
+      setPresetEvidenceId(benchmark.intake.evidenceId);
       setImageBase64(undefined);
       setMimeType('');
       setIntakeError(null);
@@ -164,7 +172,10 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
       setIntakeError('Select a media file, or choose a benchmark case, before completing Step 1.');
       return;
     }
-    const evidenceId = initialIntake?.evidenceId || `EVD-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const evidenceId =
+      presetEvidenceId ||
+      initialIntake?.evidenceId ||
+      `EVD-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const intakeData: MediaIntakeData = {
       evidenceId,
@@ -182,6 +193,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
       sourceUrl,
       exifData: exifTags,
       uploadTimestamp: new Date().toISOString(),
+      isPrecomputed,
     };
 
     // G22/G17: both the bytes and the mime type reach the caller.

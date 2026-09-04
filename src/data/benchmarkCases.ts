@@ -173,6 +173,7 @@ const svgCase5 = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="50
 
 export const BENCHMARK_CASES: BenchmarkCase[] = [
   {
+    isPrecomputed: true,
     id: 'case-recycled-disaster',
     title: 'Recycled 2018 Palu Tsunami Captioned as 2026 Coastal Catastrophe',
     category: 'False Narrative / Recycled',
@@ -329,6 +330,7 @@ export const BENCHMARK_CASES: BenchmarkCase[] = [
     },
   },
   {
+    isPrecomputed: true,
     id: 'case-deepfake-diplomat',
     title: 'Synthetic GenAI Deepfake of High-Level Diplomat at Geneva Summit',
     category: 'Deepfake / Synthetic AI',
@@ -474,6 +476,7 @@ export const BENCHMARK_CASES: BenchmarkCase[] = [
     },
   },
   {
+    isPrecomputed: true,
     id: 'case-spliced-protest',
     title: 'Digitally Spliced Extremist Banner & Cloned Crowd at Capitol Rally',
     category: 'Pixel Tampered / Spliced',
@@ -617,6 +620,7 @@ export const BENCHMARK_CASES: BenchmarkCase[] = [
     },
   },
   {
+    isPrecomputed: true,
     id: 'case-recycled-conflict',
     title: 'Recycled 2014 Grad Artillery Strike Recaptioned as 2026 Border Incursion',
     category: 'False Narrative / Recycled',
@@ -755,6 +759,7 @@ export const BENCHMARK_CASES: BenchmarkCase[] = [
     },
   },
   {
+    isPrecomputed: true,
     id: 'case-forged-memo',
     title: 'Fabricated Declassified Intelligence Memorandum on Covert Program',
     category: 'Pixel Tampered / Spliced',

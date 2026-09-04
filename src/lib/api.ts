@@ -245,6 +245,11 @@ export function askCrossExaminer(
  * with G7 in place that rejection surfaces as an error rather than as a
  * fabricated all-clear.
  */
+export function mimeTypeFromDataUrl(dataUrl: string): string | undefined {
+  const match = /^data:([a-zA-Z0-9!#$&^_.+-]+\/[a-zA-Z0-9!#$&^_.+-]+);/.exec(dataUrl);
+  return match?.[1];
+}
+
 export function toAnalyzeRequest(
   intake: MediaIntakeData,
   imageBase64: string,

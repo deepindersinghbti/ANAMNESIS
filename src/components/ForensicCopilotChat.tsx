@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  AlertTriangle,
   MessageSquare,
   Send,
   Sparkles,
@@ -7,29 +8,36 @@ import {
   User,
   ShieldCheck,
 } from 'lucide-react';
-import { AnamnesisForensicReport, MediaIntakeData } from '../types';
+import { isAssessed, PersistentCaseState } from '../types';
+import { askCrossExaminer, ApiError } from '../lib/api';
 
 interface ForensicCopilotChatProps {
-  report: AnamnesisForensicReport;
-  intake: MediaIntakeData;
+  /* Step components read PersistentCaseState, never the wire type. */
+  caseState: PersistentCaseState;
+  /** Data URL of the ingested media, held in memory for the session only. */
   imageBase64?: string;
+  /** Always sent alongside the bytes; the server must not guess. */
+  mimeType?: string;
 }
 
 interface Message {
-  role: 'user' | 'assistant';
+  /* 'error' is a first-class role: a failed query must be visibly a
+   * failure, never a grey assistant reply that reads like a finding. */
+  role: 'user' | 'assistant' | 'error';
   content: string;
   timestamp: string;
 }
 
 export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
-  report,
-  intake,
+  caseState,
   imageBase64,
+  mimeType,
 }) => {
+  const { ingest, report } = caseState;
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: `ANAMNESIS Cross-Examiner online for Case **${report.case_summary.evidence_id}**.\n\nI have evaluated the evidence against the 5 Core Questions. You can ask me to probe specific visual inconsistencies, analyze shadow/lighting physics, generate OSINT geolocation confirmation checklists, or formulate legal admissibility briefs.`,
+      content: `ANAMNESIS Cross-Examiner online for Case **${report.forensicPackage.evidenceId || ingest.evidenceId}**.\n\nI have evaluated the evidence against the 5 Core Questions. You can ask me to probe specific visual inconsistencies, analyze shadow/lighting physics, generate OSINT geolocation confirmation checklists, or formulate legal admissibility briefs.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -56,39 +64,62 @@ export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/forensics/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          reportContext: {
-            summary: report.case_summary,
-            fiveQuestions: report.the_five_questions,
-            integrity: report.context_integrity_check,
-            intakeMeta: {
-              claimedLocation: intake.claimedLocation,
-              claimedDateTime: intake.claimedDateTime,
-              claimedNarrative: intake.claimedNarrative,
-              hash: intake.fileHashSha256,
-            },
-          },
-          imageBase64: imageBase64 || (intake.previewUrl.startsWith('data:') ? intake.previewUrl : undefined),
-        }),
+      /* Everything the model is told about this case, assembled from the
+       * view model. It is reference material, not instruction — the system
+       * prompt that governs behaviour is server-authored. */
+      const reportContext = {
+        evidenceId: report.forensicPackage.evidenceId || ingest.evidenceId,
+        verdict: report.forensicPackage.findings,
+        fiveQuestions: report.digitalCrimeScene,
+        integrity: {
+          rawMedia: caseState.investigation.contextCheck.rawMediaStatus,
+          claimedLocation: caseState.investigation.contextCheck.claimedLocationStatus,
+          claimedTime: caseState.investigation.contextCheck.claimedTimeStatus,
+          audio: caseState.investigation.contextCheck.audioStatus,
+        },
+        intakeMeta: {
+          claimedLocation: ingest.claimedLocation,
+          claimedDateTime: ingest.claimedDateTime,
+          claimedNarrative: ingest.claimedNarrative,
+          hash: ingest.fileHashSha256,
+        },
+      };
+
+      /* G17: bytes travel with their real mime type or they do not travel.
+       * A benchmark SVG sent as image/jpeg is the exact case the
+       * specification warns about. */
+      const media =
+        imageBase64 && mimeType && mimeType.startsWith('image/')
+          ? { imageBase64, mimeType }
+          : {};
+
+      /* G7/G8/G9: res.ok is checked, the request aborts at 30s, and any
+       * failure arrives as a typed ApiError. There is deliberately no
+       * fallback string — a failed call used to render as "Analysis
+       * completed with no additional discrepancies found", which is a
+       * fabricated all-clear and worse than no chat at all. */
+      const { reply } = await askCrossExaminer({
+        message: text,
+        reportContext: reportContext as never,
+        ...media,
       });
 
-      const data = await res.json();
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: data.reply || 'Analysis completed with no additional discrepancies found.',
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-    } catch (err: any) {
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: `Error during forensic query processing: ${err.message || 'Unable to connect to engine.'}`,
+          content: reply,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } catch (err) {
+      const message =
+        err instanceof ApiError ? err.message : 'The cross-examiner could not be reached.';
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'error',
+          content: message,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -137,16 +168,40 @@ export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
                 <Bot className="w-4 h-4" />
               </div>
             )}
+            {m.role === 'error' && (
+              <div className="w-8 h-8 rounded-2xl bg-[#06060c] border border-rose-600/60 flex items-center justify-center shrink-0 text-rose-400 mt-0.5">
+                <AlertTriangle className="w-4 h-4" />
+              </div>
+            )}
 
+            {/* A failed query is styled as a failure. It must never be
+                mistakable for an answer — that is the whole reason this
+                component was not mounted until the error path existed. */}
             <div
               className={`max-w-[85%] rounded-2xl p-4 space-y-1.5 leading-relaxed ${
                 m.role === 'user'
                   ? 'bg-gradient-to-r from-[#3b82f6]/20 via-[#ec4899]/20 to-[#f97316]/20 border border-[#ec4899]/50 text-zinc-100'
+                  : m.role === 'error'
+                  ? 'bg-rose-950/50 border border-rose-600/60 text-rose-200 shadow-md font-sans'
                   : 'bg-[#06060c] border border-zinc-800 text-zinc-200 shadow-md font-sans'
               }`}
             >
-              <div className="flex items-center justify-between gap-4 text-[10px] text-zinc-400 font-mono border-b border-zinc-800/80 pb-1">
-                <span className="font-bold text-pink-300">{m.role === 'user' ? 'INVESTIGATOR' : 'ANAMNESIS ENGINE'}</span>
+              <div
+                className={`flex items-center justify-between gap-4 text-[10px] font-mono border-b pb-1 ${
+                  m.role === 'error'
+                    ? 'text-rose-300 border-rose-800/70'
+                    : 'text-zinc-400 border-zinc-800/80'
+                }`}
+              >
+                <span
+                  className={`font-bold ${m.role === 'error' ? 'text-rose-300' : 'text-pink-300'}`}
+                >
+                  {m.role === 'user'
+                    ? 'INVESTIGATOR'
+                    : m.role === 'error'
+                    ? 'QUERY FAILED — NOT A FINDING'
+                    : 'ANAMNESIS ENGINE'}
+                </span>
                 <span>{m.timestamp}</span>
               </div>
               <div className="whitespace-pre-wrap leading-relaxed text-xs">{m.content}</div>
