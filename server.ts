@@ -28,6 +28,96 @@ const GEMINI_MIN_TIMEOUT_MS = 10_000;
 const requestedTimeout = Number(process.env.GEMINI_TIMEOUT_MS) || 30_000;
 const GEMINI_TIMEOUT_MS = Math.max(requestedTimeout, GEMINI_MIN_TIMEOUT_MS);
 
+/* ===========================================================================
+ * G14 — SHARED-SECRET GATE
+ *
+ * Both POST routes are the only paths to a metered external API, and the
+ * deployed URL is public. Without this, anyone who finds the host can spend
+ * the key's quota; exhaustion before judging is a realistic outcome.
+ *
+ * Be clear about what this is. The browser has to send the secret, so the
+ * secret is in the bundle, and anyone willing to open devtools can read it.
+ * It stops drive-by and automated traffic, not a motivated person. Real
+ * departmental identity is the production answer and is out of scope; the
+ * rate limiter below is what bounds the damage either way.
+ * ======================================================================== */
+
+const API_SHARED_SECRET = process.env.API_SHARED_SECRET?.trim() || '';
+const IS_PRODUCTION = process.env.NODE_ENV !== 'development';
+
+function requireSharedSecret(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (!API_SHARED_SECRET) {
+    /* Unset. In development that is a convenience; in production it means
+     * the proxy is open, so it fails closed rather than silently serving. */
+    if (IS_PRODUCTION) {
+      res.status(503).json({
+        error: 'The forensics engine is not configured for requests. Set API_SHARED_SECRET.',
+      });
+      return;
+    }
+    next();
+    return;
+  }
+
+  const presented = req.get('x-anamnesis-key') ?? '';
+  if (presented !== API_SHARED_SECRET) {
+    res.status(401).json({ error: 'This request was not authorised by the forensics engine.' });
+    return;
+  }
+  next();
+}
+
+/* ===========================================================================
+ * G15 — RATE LIMITING BY IP
+ *
+ * A fixed window held in memory. That is the right size for a single-process
+ * prototype and deliberately not a dependency: it needs no store, no client
+ * and nothing to fail at boot. It does not survive a restart and does not
+ * coordinate across instances — both acceptable when there is one process,
+ * and both worth knowing before this is ever scaled.
+ * ======================================================================== */
+
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 12;
+
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+
+  if (!bucket || now >= bucket.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    next();
+    return;
+  }
+
+  if (bucket.count >= RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: `Too many analysis requests from this address. Try again in ${retryAfter}s.`,
+    });
+    return;
+  }
+
+  bucket.count += 1;
+  next();
+}
+
+/* Keep the map from growing without bound on a long-running process. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref();
+
 /**
  * An abort signal for one upstream call.
  *
@@ -181,7 +271,8 @@ function mapUpstreamFailure(error: any, timedOut = false): UpstreamFailure {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  /* G12: platforms inject PORT. A hardcoded 3000 worked only by luck. */
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -209,12 +300,15 @@ async function startServer() {
       engine: 'ANAMNESIS v3.4 Forensics Engine',
       model: GEMINI_MODEL,
       timeoutMs: GEMINI_TIMEOUT_MS,
+      // Whether a secret is required, never the secret itself.
+      authRequired: Boolean(API_SHARED_SECRET),
+      rateLimit: { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS },
       timestamp: new Date().toISOString(),
     });
   });
 
   // Forensic Analysis endpoint
-  app.post('/api/forensics/analyze', async (req, res) => {
+  app.post('/api/forensics/analyze', rateLimit, requireSharedSecret, async (req, res) => {
     const abort = requestAbort(res);
     try {
       const {
@@ -447,7 +541,7 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
   });
 
   // Forensic Cross-Examination Chat endpoint
-  app.post('/api/forensics/chat', async (req, res) => {
+  app.post('/api/forensics/chat', rateLimit, requireSharedSecret, async (req, res) => {
     const abort = requestAbort(res);
     try {
       const { message, reportContext, imageBase64, mimeType } = req.body;
@@ -500,7 +594,10 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
   });
 
   // Vite middleware in dev / Static files in production
-  if (process.env.NODE_ENV !== 'production') {
+  /* G13: the check was `!== 'production'`, so an unset NODE_ENV booted a
+   * Vite dev server in production. Inverting it makes the safe path the one
+   * that happens by accident. */
+  if (process.env.NODE_ENV === 'development') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -524,6 +621,17 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       );
     }
     console.log(`ANAMNESIS API key: ${process.env.GEMINI_API_KEY ? 'configured' : 'MISSING - analysis will fail'}`);
+    console.log(
+      `ANAMNESIS auth:    ${
+        API_SHARED_SECRET
+          ? 'shared secret required on POST routes'
+          : IS_PRODUCTION
+          ? 'MISSING - POST routes will refuse every request'
+          : 'not set (development only; POST routes are open)'
+      }`
+    );
+    console.log(`ANAMNESIS limit:   ${RATE_LIMIT_MAX} requests / ${RATE_LIMIT_WINDOW_MS}ms per IP`);
+    console.log(`ANAMNESIS mode:    ${IS_PRODUCTION ? 'production (static dist/)' : 'development (vite middleware)'}`);
   });
 }
 

@@ -18,6 +18,40 @@ interface DossierExportModalProps {
   intake: MediaIntakeData;
 }
 
+
+/* ===========================================================================
+ * G25 — jsPDF CANNOT RENDER EMOJI
+ *
+ * The built-in Helvetica/Times fonts are WinAnsi-encoded. Status values now
+ * carry a leading glyph (e.g. "OBSERVED / CONSISTENT" prefixed with a green
+ * circle, "NOT ASSESSED" with a white one), and any of those written through
+ * doc.text() comes out as mojibake in the exported dossier — the one artefact
+ * an investigator is most likely to hand to somebody else.
+ *
+ * Stripping is safe precisely because the glyph is decorative: the words
+ * beside it already carry the meaning, so the status still reads correctly.
+ * Model prose goes through the same filter, since nothing stops a model
+ * returning an emoji of its own.
+ * ======================================================================== */
+const pdfSafe = (value: unknown): string =>
+  String(value ?? '')
+    // Arrows carry meaning in the cascade lines, so they become ASCII
+    // rather than disappearing and running two clauses together.
+    .replace(/[→➔➡➜⟶➙]/g, '->')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/…/g, '...')
+    // Emoji, symbols, dingbats, variation selectors, ZWJ.
+    .replace(
+      /[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{2600}-\u{27BF}]/gu,
+      ''
+    )
+    // Anything else the core fonts cannot encode.
+    .replace(/[^\x00-\xFF]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
 export const DossierExportModal: React.FC<DossierExportModalProps> = ({
   isOpen,
   onClose,
@@ -54,8 +88,8 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFontSize(10);
       doc.setTextColor(203, 213, 225);
-      doc.text(`A Digital Crime-Scene Intelligence | EVIDENCE ID: ${report.case_summary.evidence_id}`, 14, 26);
-      doc.text(`DIGITAL HASH (SHA-256): ${report.case_summary.primary_hash_sha256.slice(0, 48)}...`, 14, 34);
+      doc.text(pdfSafe(`A Digital Crime-Scene Intelligence | EVIDENCE ID: ${report.case_summary.evidence_id}`), 14, 26);
+      doc.text(pdfSafe(`DIGITAL HASH (SHA-256): ${report.case_summary.primary_hash_sha256.slice(0, 48)}...`), 14, 34);
 
       // Verdict Summary
       doc.setTextColor(15, 23, 42);
@@ -65,7 +99,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      const splitVerdict = doc.splitTextToSize(report.case_summary.verdict_summary, pageWidth - 28);
+      const splitVerdict = doc.splitTextToSize(pdfSafe(report.case_summary.verdict_summary), pageWidth - 28);
       doc.text(splitVerdict, 14, 60);
 
       let yPos = 60 + splitVerdict.length * 6 + 10;
@@ -91,12 +125,12 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
         }
         doc.setFont('courier', 'bold');
         doc.setFontSize(10);
-        doc.text(q.label, 14, yPos);
+        doc.text(pdfSafe(q.label), 14, yPos);
         yPos += 5;
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        const splitQ = doc.splitTextToSize(q.text, pageWidth - 28);
+        const splitQ = doc.splitTextToSize(pdfSafe(q.text), pageWidth - 28);
         doc.text(splitQ, 14, yPos);
         yPos += splitQ.length * 5 + 4;
       });
@@ -114,13 +148,13 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('courier', 'normal');
       doc.setFontSize(9);
-      doc.text(`- Raw Media Status: ${report.context_integrity_check.raw_media_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Raw Media Status: ${report.context_integrity_check.raw_media_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Claimed Location Status: ${report.context_integrity_check.claimed_location_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Claimed Location Status: ${report.context_integrity_check.claimed_location_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Claimed Timestamp Status: ${report.context_integrity_check.claimed_time_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Claimed Timestamp Status: ${report.context_integrity_check.claimed_time_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Audio Stream Integrity: ${report.context_integrity_check.audio_integrity_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Audio Stream Integrity: ${report.context_integrity_check.audio_integrity_status}`), 14, yPos);
       yPos += 10;
 
       // Investigator Notes
@@ -135,7 +169,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      const splitNotes = doc.splitTextToSize(report.investigator_notes, pageWidth - 28);
+      const splitNotes = doc.splitTextToSize(pdfSafe(report.investigator_notes), pageWidth - 28);
       doc.text(splitNotes, 14, yPos);
       yPos += splitNotes.length * 5 + 15;
 

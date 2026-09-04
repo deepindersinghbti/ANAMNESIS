@@ -23,6 +23,20 @@ import {
 /** Requests are abandoned after this long. Fig. 2 of the specification. */
 export const REQUEST_TIMEOUT_MS = 30_000;
 
+/* Compiled in by vite from API_SHARED_SECRET. Declared in vite.config.ts so
+ * one variable serves both sides. Empty in a build made without it, in which
+ * case the server decides whether to allow the request. */
+declare const __API_SHARED_SECRET__: string;
+const SHARED_SECRET =
+  typeof __API_SHARED_SECRET__ === 'string' ? __API_SHARED_SECRET__ : '';
+
+/** Headers for a POST. The secret is omitted entirely when there isn't one. */
+function requestHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (SHARED_SECRET) headers['x-anamnesis-key'] = SHARED_SECRET;
+  return headers;
+}
+
 export type ApiFailureKind = 'timeout' | 'offline' | 'http' | 'malformed';
 
 /**
@@ -133,7 +147,7 @@ export async function postJson<TResponse>(
   try {
     res = await fetch(path, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: requestHeaders(),
       body: JSON.stringify(body),
       signal: controller.signal,
     });
