@@ -259,7 +259,13 @@ export function buildCaseState(
         },
       },
       forensicPackage: {
-        evidenceId: report.case_summary.evidence_id,
+        /* The case number belongs to the investigation, not to the model.
+         * Left to its own devices the model returns the example string from
+         * the responseSchema description verbatim, so every live case came
+         * back as the same evidence id and every exported dossier carried
+         * it. The intake's id is the real one; the model's is a fallback
+         * for a case that somehow has none. */
+        evidenceId: intake.evidenceId || report.case_summary.evidence_id,
         sha256: report.case_summary.primary_hash_sha256,
         findings: report.case_summary.verdict_summary,
         // Per-dimension confidence is not part of the schema.
