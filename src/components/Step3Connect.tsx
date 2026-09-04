@@ -11,7 +11,7 @@ import {
   ArrowDown,
   Sparkles,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { isAssessed, PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
 import { soundFx } from '../lib/soundFx';
@@ -26,7 +26,11 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
   onComplete,
 }) => {
   const { ingest, relationships } = caseState;
-  const targetCount = relationships.totalRelatedFound || 14;
+  /* No invented default. When the lineage count was never assessed the
+   * counter stays at zero and the reveal animation does not run. */
+  const targetCount = isAssessed(relationships.totalRelatedFound)
+    ? relationships.totalRelatedFound
+    : 0;
 
   // Requirement 2: Related media discovery animation (0 -> 3 -> 7 -> 11 -> 14)
   const [animatedCount, setAnimatedCount] = useState<number>(0);
@@ -38,7 +42,18 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
 
   useEffect(() => {
     // Count animation steps
-    const countSteps = [0, 3, 7, 11, targetCount];
+    const countSteps =
+      targetCount > 0
+        ? Array.from(
+            new Set([
+              0,
+              Math.round(targetCount * 0.25),
+              Math.round(targetCount * 0.5),
+              Math.round(targetCount * 0.75),
+              targetCount,
+            ])
+          )
+        : [0];
     const timers: NodeJS.Timeout[] = [];
 
     countSteps.forEach((countVal, idx) => {

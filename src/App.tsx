@@ -1,6 +1,6 @@
 /* Prototype authentication/storage only. Production deployment requires secure departmental identity, encryption, access control and audit logging. */
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -30,12 +30,35 @@ import {
 } from './data/mockInvestigator';
 import {
   AnamnesisForensicReport,
+  ExportableDossier,
   InvestigatorProfile,
+  isAssessed,
   MediaIntakeData,
+  NOT_ASSESSED,
   PersistentCaseState,
   SavedCase,
+  TechnicalForensicMetrics,
 } from './types';
 import { soundFx } from './lib/soundFx';
+import { analyzeMedia, ApiError, toAnalyzeRequest } from './lib/api';
+
+/** The zero state of an intake: no file, no claims, no measurements. */
+const EMPTY_INTAKE: MediaIntakeData = {
+  evidenceId: '',
+  title: '',
+  mediaType: 'image',
+  mediaUrl: '',
+  previewUrl: '',
+  fileName: '',
+  fileSize: 0,
+  fileHashSha256: '',
+  claimedLocation: '',
+  claimedDateTime: '',
+  claimedNarrative: '',
+  sourcePlatform: '',
+  exifData: {},
+  uploadTimestamp: '',
+};
 
 type AppView = 'welcome' | 'login' | 'home' | 'profile' | 'investigation';
 
@@ -71,9 +94,27 @@ export default function App() {
   const [expandedCompletedSteps, setExpandedCompletedSteps] = useState<{ [key: number]: boolean }>({});
 
   // Persistent Case State (accumulated across steps)
+  /* G2: the application used to open already displaying a benchmark case,
+   * so the very first render showed findings nobody had ingested. It now
+   * opens on an empty, honestly-labelled case. */
   const [caseState, setCaseState] = useState<PersistentCaseState>(() =>
-    buildCaseState(BENCHMARK_CASES[0].intake, BENCHMARK_CASES[0].precomputedReport)
+    buildCaseState(EMPTY_INTAKE, null)
   );
+
+  // Set while the analyse request is in flight, so Step 1 can show a real,
+  // cancellable spinner rather than an instant transition to fabricated data.
+  const [isAnalysing, setIsAnalysing] = useState(false);
+  const analyseAbortRef = useRef<AbortController | null>(null);
+
+  /* The last submitted intake, kept so the error card's Retry button can
+   * re-fire the exact same request. A retry that made the investigator
+   * re-enter the claimed context would not get used during a demonstration. */
+  const lastAttemptRef = useRef<{
+    intake: MediaIntakeData;
+    imageBase64: string;
+    mimeType: string;
+  } | null>(null);
+  const [canRetryAnalysis, setCanRetryAnalysis] = useState(false);
 
   // Modal State
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -128,7 +169,9 @@ export default function App() {
       } else {
         nextCases = [updatedSavedCase, ...prevCases];
       }
-      saveCasesToStorage(investigator.id, nextCases);
+      // G18: a failed write is surfaced, never logged and forgotten.
+      const failure = saveCasesToStorage(investigator.id, nextCases);
+      if (failure) setErrorMessage(failure);
       return nextCases;
     });
   };
@@ -213,80 +256,11 @@ export default function App() {
       uploadTimestamp: new Date().toISOString(),
     };
 
-    const newEmptyCaseState: PersistentCaseState = {
-      ingest: newIntake,
-      analysis: {
-        visual: {
-          frameCharacteristics: 'Awaiting Media Ingest',
-          visualIndicators: [],
-          chromaticAberration: 'Pending analysis',
-          lightingConsistency: 'Pending analysis',
-          confidence: 0,
-        },
-        audio: {
-          audioCharacteristics: 'Awaiting Audio Stream',
-          audioIndicators: [],
-          enfStatus: 'Pending',
-          confidence: 0,
-        },
-        structural: {
-          streamCharacteristics: 'Awaiting Container Stream',
-          compressionGenerations: 0,
-          metadataTamperFlag: false,
-          confidence: 0,
-        },
-        manipulation: {
-          mutationsDetected: [],
-          syntheticProbabilityScore: 0,
-          manipulationConfidence: 0,
-          status: '🟠 NEEDS VERIFICATION',
-        },
-      },
-      relationships: {
-        totalRelatedFound: 0,
-        nodes: [],
-        lineageHierarchy: [],
-      },
-      investigation: {
-        forensicReplay: [],
-        originEcho: {
-          is_estimated: true,
-          label: 'ESTIMATED — NOT ORIGINAL EVIDENCE',
-          surviving_attributes: [],
-        },
-        contextCheck: {
-          rawMediaStatus: '🟠 NEEDS VERIFICATION',
-          claimedLocationStatus: '🟠 NEEDS VERIFICATION',
-          claimedTimeStatus: '🟠 NEEDS VERIFICATION',
-          audioStatus: '🟢 OBSERVED / CONSISTENT',
-          cascade: {
-            rawMedia: 'Pending ingest',
-            claimedDate: 'Pending ingest',
-            claimedLocation: 'Pending ingest',
-            claimedCaption: 'Pending ingest',
-          },
-          summary: 'Investigation in progress.',
-        },
-      },
-      report: {
-        digitalCrimeScene: {
-          who: { observation: 'Pending analysis', confidence: 0 },
-          where: { claimed: '', observed: '', status: 'Needs Verification' },
-          when: { claimed: '', observed: '', status: 'Needs Verification' },
-          what: { mutations_detected: [], details: '' },
-          how: { lineage_notes: '', estimated_generations: 0 },
-          source: { earliestKnownSource: '', platform: '' },
-        },
-        forensicPackage: {
-          evidenceId: newId,
-          sha256: 'PENDING_SEAL',
-          findings: 'Pending completion of investigative workflow.',
-          confidenceScores: {},
-          processingHistory: [`Case #${newId} opened at ${new Date().toISOString()}`],
-          generatedAt: new Date().toISOString(),
-        },
-      },
-    };
+    /* A new case has no media and no analysis, so it is exactly what the
+     * adapter's null branch describes. Hand-rolling it here previously
+     * fabricated a set of findings for an empty case — including a green
+     * "audio consistent" tick on a case with no audio in it. */
+    const newEmptyCaseState: PersistentCaseState = buildCaseState(newIntake, null);
 
     const newSavedCase: SavedCase = {
       id: newId,
@@ -302,7 +276,8 @@ export default function App() {
 
     const updatedList = [newSavedCase, ...savedCases];
     setSavedCases(updatedList);
-    saveCasesToStorage(investigator.id, updatedList);
+    const failure = saveCasesToStorage(investigator.id, updatedList);
+    if (failure) setErrorMessage(failure);
 
     // Update active investigation state
     setActiveCaseId(newId);
@@ -315,88 +290,102 @@ export default function App() {
 
   // --- STEP COMPLETE HANDLERS ---
 
-  // STEP 1 COMPLETE HANDLER
-  const handleStep1Complete = (intake: MediaIntakeData) => {
-    const benchmark = BENCHMARK_CASES.find(
-      (b) => b.intake.fileName === intake.fileName || b.intake.evidenceId === intake.evidenceId
-    );
+  /* STEP 1 COMPLETE HANDLER — the ingest path.
+   *
+   * G22: the second argument is consumed. Step1Ingest has always passed the
+   *      base64 payload; this handler used to declare one parameter and drop
+   *      it, which is why no image ever reached the model.
+   * G1:  the analyse route is actually called.
+   * G2:  there is no fallback report and no benchmark lookup. A failure
+   *      produces a visible error and a case carrying only real local
+   *      measurements — never a stored report about someone else's file.
+   */
+  const handleStep1Complete = async (
+    intake: MediaIntakeData,
+    imageBase64?: string,
+    mimeType?: string
+  ) => {
+    setErrorMessage(null);
+    setCanRetryAnalysis(false);
 
-    const reportToUse: AnamnesisForensicReport =
-      benchmark?.precomputedReport || {
-        case_summary: {
-          evidence_id: intake.evidenceId,
-          primary_hash_sha256: intake.fileHashSha256,
-          verdict_summary: `Physical media stream verified; narrative claims regarding ${intake.claimedLocation} decoupled from underlying capture.`,
-        },
-        the_five_questions: {
-          who: {
-            observation: 'Detected subject motion vectors and facial landmarks consistent with baseline optics.',
-            confidence: 0.89,
-          },
-          where: {
-            claimed: intake.claimedLocation,
-            observed: 'Archived Landmark Topography (Central Sulawesi Coordinate Match)',
-            status: 'Inconsistent',
-          },
-          when: {
-            claimed: intake.claimedDateTime,
-            observed: 'Archived Ingest Stream (2018-09-28 Capture Timestamp)',
-            status: 'Inconsistent',
-          },
-          what_changed: {
-            mutations_detected: ['Spatial Crop', 'Quantization Compression', 'Channel Stamp', 'Mobile Screen Capture'],
-            details: 'Original landscape aspect ratio cropped into 1:1 square frame; stripped EXIF telemetry.',
-          },
-          how_it_spread: {
-            lineage_notes: 'Propagation initiated via root video repository, transcoded into Telegram news channels, forwarded via WhatsApp.',
-            estimated_generations: 4,
-          },
-        },
-        forensic_replay_timeline: [
-          { stage: 1, label: 'Uncompressed Origin Source', description: 'Original high-bitrate video stream with full environmental context.', platform: 'Direct Ingest' },
-          { stage: 2, label: 'Tight Spatial Crop', description: 'Left and right spatial margins cropped to remove identifying signage.', platform: 'Video Editor' },
-          { stage: 3, label: 'Channel Watermark Injected', description: 'High-contrast channel logo stamped over upper corner.', platform: 'Telegram' },
-          { stage: 4, label: 'Multi-Generation Compression', description: 'Heavy discrete cosine transform quantization and chroma sub-sampling.', platform: 'WhatsApp Forward' },
-          { stage: 5, label: 'Screen Recording with Deceptive Caption', description: 'Mobile screen recording re-uploaded with fabricated viral location and date.', platform: intake.sourcePlatform },
-        ],
-        context_integrity_check: {
-          raw_media_status: '🟢 Consistent',
-          claimed_location_status: '🔴 Inconsistent',
-          claimed_time_status: '🔴 Inconsistent',
-          audio_integrity_status: '🟢 Untampered',
-        },
-        investigator_notes: 'Cross-correlate earliest known archive timestamps with regional meteorological and satellite catalogs.',
-        technical_metrics: {
-          synthetic_probability_score: 12,
-          manipulation_confidence: 84,
-          compression_generations: 4,
-          metadata_tamper_flag: true,
-          chromatic_aberration_consistency: 'Natural',
-          lighting_vector_consistency: 'Consistent',
-          shadow_sun_angle_match: 'Matched',
-        },
-        origin_echo: {
-          is_estimated: true,
-          label: 'ESTIMATED — NOT ORIGINAL EVIDENCE',
-          earliest_known_timestamp: '2018-09-28T14:30:00Z',
-          unmanipulated_scene_description:
-            'Original uncropped wide frame showing full landscape context and original background structures.',
-          surviving_attributes: [
-            'Spatial geometry of horizon and background architecture',
-            'Acoustic reverberation envelope of environment',
-            'Core subject motion trajectory preserved across all 14 copies',
-          ],
-        },
-      };
+    // Demo Mode: a precomputed reference case, entered deliberately and
+    // badged as such in Step 1. It performs no network call by design.
+    const precomputed = BENCHMARK_CASES.find((b) => b.intake.evidenceId === intake.evidenceId);
+    if (precomputed && !imageBase64) {
+      const demoState = buildCaseState(intake, precomputed.precomputedReport);
+      const done = Array.from(new Set([...completedSteps, 1]));
+      setCaseState(demoState);
+      setCompletedSteps(done);
+      setWorkflowStage(1.5);
+      soundFx.playStepCompletion();
+      triggerStepFeedback('STEP 1: Reference case loaded (precomputed).');
+      syncActiveCase(demoState, 1.5, done, activeCaseId);
+      return;
+    }
 
-    const newCaseState = buildCaseState(intake, reportToUse);
-    const updatedDone = Array.from(new Set([...completedSteps, 1]));
-    setCaseState(newCaseState);
-    setCompletedSteps(updatedDone);
-    setWorkflowStage(1.5);
-    soundFx.playStepCompletion();
-    triggerStepFeedback('STEP 1: Media ingested.');
-    syncActiveCase(newCaseState, 1.5, updatedDone, activeCaseId);
+    if (!imageBase64 || !mimeType) {
+      setErrorMessage(
+        'No media was read from the file. Re-select it and wait for the hash to finish computing.'
+      );
+      return;
+    }
+
+    lastAttemptRef.current = { intake, imageBase64, mimeType };
+
+    const controller = new AbortController();
+    analyseAbortRef.current = controller;
+    setIsAnalysing(true);
+
+    try {
+      const report = await analyzeMedia(
+        toAnalyzeRequest(intake, imageBase64, mimeType),
+        { signal: controller.signal }
+      );
+
+      const analysedState = buildCaseState(intake, report);
+      const done = Array.from(new Set([...completedSteps, 1]));
+      setCaseState(analysedState);
+      setCompletedSteps(done);
+      setWorkflowStage(1.5);
+      soundFx.playStepCompletion();
+      triggerStepFeedback('STEP 1: Media ingested and analysed.');
+      syncActiveCase(analysedState, 1.5, done, activeCaseId);
+    } catch (err) {
+      /* The honest failure state. The hash, the EXIF tags and the claimed
+       * context are real and are kept; everything interpretive is
+       * NOT_ASSESSED. The workflow does NOT advance — an un-analysed case
+       * must not present itself as a completed step. */
+      const apiError = err instanceof ApiError ? err : null;
+      const message = apiError?.message ?? 'The analysis could not be completed.';
+
+      /* The local measurements survive a failed call, and saying so matters:
+       * the investigator still has a real hash and real EXIF, which is a
+       * usable result rather than a dead end. */
+      setErrorMessage(
+        apiError?.isRetryable
+          ? `${message} The SHA-256 and metadata were measured in this browser and are unaffected.`
+          : message
+      );
+      setCanRetryAnalysis(Boolean(apiError?.isRetryable));
+
+      const localOnlyState = buildCaseState(intake, null);
+      setCaseState(localOnlyState);
+      syncActiveCase(localOnlyState, workflowStage, completedSteps, activeCaseId);
+    } finally {
+      setIsAnalysing(false);
+      analyseAbortRef.current = null;
+    }
+  };
+
+  const handleCancelAnalysis = () => {
+    analyseAbortRef.current?.abort();
+  };
+
+  /** Re-run the last analysis with the identical payload. */
+  const handleRetryAnalysis = () => {
+    const attempt = lastAttemptRef.current;
+    if (!attempt || isAnalysing) return;
+    void handleStep1Complete(attempt.intake, attempt.imageBase64, attempt.mimeType);
   };
 
   // STEP 2 COMPLETE HANDLER
@@ -445,14 +434,41 @@ export default function App() {
     syncActiveCase(caseState, nextStage, completedSteps, activeCaseId);
   };
 
-  // Adapter for Dossier Export Modal
-  const exportReport: AnamnesisForensicReport = {
+  /* Adapter for the Dossier Export Modal: view model back out to the dossier
+   * shape. Every value is copied from caseState; nothing is authored here.
+   * Optional blocks are omitted when nothing in them was assessed, so the
+   * exported PDF shows a gap rather than a default. */
+  const exportedMetrics: Partial<TechnicalForensicMetrics> = {};
+  if (isAssessed(caseState.analysis.manipulation.syntheticProbabilityScore)) {
+    exportedMetrics.synthetic_probability_score = caseState.analysis.manipulation.syntheticProbabilityScore;
+  }
+  if (isAssessed(caseState.analysis.manipulation.manipulationConfidence)) {
+    exportedMetrics.manipulation_confidence = caseState.analysis.manipulation.manipulationConfidence;
+  }
+  if (isAssessed(caseState.analysis.structural.compressionGenerations)) {
+    exportedMetrics.compression_generations = caseState.analysis.structural.compressionGenerations;
+  }
+  if (isAssessed(caseState.analysis.structural.metadataTamperFlag)) {
+    exportedMetrics.metadata_tamper_flag = caseState.analysis.structural.metadataTamperFlag;
+  }
+
+  const scene = caseState.report.digitalCrimeScene;
+  const exportReport: ExportableDossier = {
     case_summary: {
       evidence_id: caseState.ingest.evidenceId,
-      primary_hash_sha256: caseState.ingest.fileHashSha256,
+      primary_hash_sha256: caseState.ingest.fileHashSha256 || NOT_ASSESSED,
       verdict_summary: caseState.investigation.contextCheck.summary,
     },
-    the_five_questions: caseState.report.digitalCrimeScene,
+    // The wire key names matter: the modal reads what_changed and
+    // how_it_spread. Passing `what` and `how` silently dropped questions
+    // 4 and 5 from every exported dossier.
+    the_five_questions: {
+      who: scene.who,
+      where: scene.where,
+      when: scene.when,
+      what_changed: scene.what,
+      how_it_spread: scene.how,
+    },
     forensic_replay_timeline: caseState.investigation.forensicReplay,
     context_integrity_check: {
       raw_media_status: caseState.investigation.contextCheck.rawMediaStatus,
@@ -460,17 +476,11 @@ export default function App() {
       claimed_time_status: caseState.investigation.contextCheck.claimedTimeStatus,
       audio_integrity_status: caseState.investigation.contextCheck.audioStatus,
     },
-    investigator_notes: 'Decoupled media findings cryptographically validated.',
-    technical_metrics: {
-      synthetic_probability_score: caseState.analysis.manipulation.syntheticProbabilityScore,
-      manipulation_confidence: caseState.analysis.manipulation.manipulationConfidence,
-      compression_generations: caseState.analysis.structural.compressionGenerations,
-      metadata_tamper_flag: caseState.analysis.structural.metadataTamperFlag,
-      chromatic_aberration_consistency: 'Natural',
-      lighting_vector_consistency: 'Consistent',
-      shadow_sun_angle_match: 'Matched',
-    },
-    origin_echo: caseState.investigation.originEcho,
+    investigator_notes: caseState.investigation.contextCheck.summary,
+    ...(Object.keys(exportedMetrics).length > 0 ? { technical_metrics: exportedMetrics } : {}),
+    ...(isAssessed(caseState.investigation.originEcho)
+      ? { origin_echo: caseState.investigation.originEcho }
+      : {}),
   };
 
   return (
@@ -560,11 +570,44 @@ export default function App() {
                   <strong className="block text-rose-200">ALERT:</strong>
                   <span>{errorMessage}</span>
                 </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  {canRetryAnalysis && (
+                    <button
+                      onClick={handleRetryAnalysis}
+                      disabled={isAnalysing}
+                      className="px-3 py-1 rounded-lg bg-rose-100 hover:bg-white text-rose-950 border border-rose-200 font-bold cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      RETRY
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      setErrorMessage(null);
+                      setCanRetryAnalysis(false);
+                    }}
+                    className="px-3 py-1 rounded-lg bg-rose-900/80 hover:bg-rose-800 text-rose-100 border border-rose-700/60 font-bold cursor-pointer"
+                  >
+                    DISMISS
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Analysis in flight. Real request, real 30s abort, cancellable. */}
+            {isAnalysing && (
+              <div className="rounded-2xl border border-purple-500/50 bg-purple-950/40 p-4 flex items-center gap-3 text-purple-200 font-mono text-xs shadow-lg">
+                <span className="w-4 h-4 rounded-full border-2 border-purple-400 border-t-transparent animate-spin shrink-0" />
+                <div className="flex-1">
+                  <strong className="block text-purple-100">ANALYSING EVIDENCE</strong>
+                  <span className="text-purple-300 font-sans">
+                    The image and your claimed context have been sent for interpretation. Times out after 30 seconds.
+                  </span>
+                </div>
                 <button
-                  onClick={() => setErrorMessage(null)}
-                  className="px-3 py-1 rounded-lg bg-rose-900/80 hover:bg-rose-800 text-rose-100 border border-rose-700/60 font-bold cursor-pointer"
+                  onClick={handleCancelAnalysis}
+                  className="px-3 py-1 rounded-lg bg-purple-900/80 hover:bg-purple-800 text-purple-100 border border-purple-700/60 font-bold cursor-pointer"
                 >
-                  DISMISS
+                  CANCEL
                 </button>
               </div>
             )}
@@ -602,6 +645,7 @@ export default function App() {
                 {/* Active Step 1 */}
                 {workflowStage === 1 && (
                   <Step1Ingest
+                    isAnalysing={isAnalysing}
                     onComplete={handleStep1Complete}
                     initialIntake={caseState.ingest}
                   />

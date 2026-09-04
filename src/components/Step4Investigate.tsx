@@ -18,7 +18,7 @@ import {
   RotateCcw,
   Info,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { isAssessed, NOT_ASSESSED, PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
 import { soundFx } from '../lib/soundFx';
@@ -304,7 +304,7 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
                   1. Estimated Creation Window
                 </span>
                 <span className="font-bold text-white text-xs">
-                  {originEcho.earliest_known_timestamp || '2018-09-28T10:02:14Z (Archival Origin)'}
+                  {(isAssessed(originEcho) && originEcho.earliest_known_timestamp) || NOT_ASSESSED}
                 </span>
               </div>
 
@@ -361,7 +361,7 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
             <div className="p-3 rounded-lg bg-[#0d0d14] border border-zinc-800 space-y-1.5">
               <span className="text-zinc-500 block text-[10px] font-bold">RECONSTRUCTED SCENE PARAMETERS:</span>
               <p className="text-zinc-300 font-sans text-xs">
-                {originEcho.unmanipulated_scene_description}
+                {(isAssessed(originEcho) && originEcho.unmanipulated_scene_description) || NOT_ASSESSED}
               </p>
             </div>
           </div>

@@ -9,12 +9,12 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Logo } from './Logo';
-import { AnamnesisForensicReport, MediaIntakeData } from '../types';
+import { ExportableDossier, isAssessed, MediaIntakeData, NOT_ASSESSED } from '../types';
 
 interface DossierExportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  report: AnamnesisForensicReport;
+  report: ExportableDossier;
   intake: MediaIntakeData;
 }
 
@@ -77,7 +77,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
       yPos += 8;
 
       const questions = [
-        { label: '1. WHO (Entities & Artifacts)', text: `${report.the_five_questions.who.observation} (Confidence: ${Math.round(report.the_five_questions.who.confidence * 100)}%)` },
+        { label: '1. WHO (Entities & Artifacts)', text: `${report.the_five_questions.who.observation} (Confidence: ${isAssessed(report.the_five_questions.who.confidence) ? Math.round(report.the_five_questions.who.confidence * 100) + '%' : NOT_ASSESSED})` },
         { label: '2. WHERE (Geolocation)', text: `Claimed: ${report.the_five_questions.where.claimed} | Observed: ${report.the_five_questions.where.observed} [Status: ${report.the_five_questions.where.status}]` },
         { label: '3. WHEN (Temporal Markers)', text: `Claimed: ${report.the_five_questions.when.claimed} | Observed: ${report.the_five_questions.when.observed} [Status: ${report.the_five_questions.when.status}]` },
         { label: '4. WHAT CHANGED (Mutations)', text: `${report.the_five_questions.what_changed.details} (Mutations: ${report.the_five_questions.what_changed.mutations_detected.join(', ')})` },
@@ -259,7 +259,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
             <div className="space-y-2">
               <div className="p-3 rounded-xl bg-[#06060c] border border-blue-900/40 space-y-1">
                 <span className="text-blue-400 font-bold block">WHO:</span>
-                <p className="font-sans">{report.the_five_questions.who.observation} (Confidence: {Math.round(report.the_five_questions.who.confidence * 100)}%)</p>
+                <p className="font-sans">{report.the_five_questions.who.observation} (Confidence: {isAssessed(report.the_five_questions.who.confidence) ? `${Math.round(report.the_five_questions.who.confidence * 100)}%` : NOT_ASSESSED})</p>
               </div>
               <div className="p-3 rounded-xl bg-[#06060c] border border-amber-900/40 space-y-1">
                 <span className="text-amber-400 font-bold block">WHERE:</span>

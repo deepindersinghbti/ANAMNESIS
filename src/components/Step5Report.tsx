@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   Sparkles,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { NOT_ASSESSED, PersistentCaseState } from '../types';
 import { soundFx } from '../lib/soundFx';
 
 interface Step5ReportProps {
@@ -62,12 +62,11 @@ export const Step5Report: React.FC<Step5ReportProps> = ({
   const whatInfo =
     caseState?.report?.digitalCrimeScene?.what?.details ||
     caseState?.investigation?.contextCheck?.summary ||
-    'Physical wave footage authentic, but recycled with fabricated viral caption and location.';
+    NOT_ASSESSED;
 
   const howInfo =
     caseState?.report?.digitalCrimeScene?.how?.lineage_notes ||
-    caseState?.report?.digitalCrimeScene?.how?.propagationPath ||
-    'Disseminated via root video repository ➔ Telegram news ➔ WhatsApp forwards ➔ Viral X post.';
+    NOT_ASSESSED;
 
   const sourceStatus = caseState?.analysis?.sourceCompleteness?.originalProvided
     ? 'Original master source confirmed (01:00.0)'

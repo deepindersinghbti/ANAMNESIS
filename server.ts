@@ -6,6 +6,107 @@ import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
+/* G11: the model ID appears as a literal in exactly one place in this
+ * codebase - the default below - and is overridable from the environment.
+ * It is logged at startup and echoed by /api/health, so "is the model
+ * right?" is answerable with one curl rather than by watching a demo fail. */
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.7-flash';
+
+/* ===========================================================================
+ * UPSTREAM ERROR MAPPING
+ *
+ * Two rules govern everything below, and they pull in the same direction:
+ *
+ *   G16  No model output and no SDK error text ever reaches the client. The
+ *        raw payload goes to the server log, which is where a developer can
+ *        read it and an investigator cannot.
+ *   Honesty  The status we return means what it says. Collapsing a busy
+ *        model into a flat 500 tells the investigator the engine is broken
+ *        when the truth is "try again in a minute" — and on a demonstration
+ *        day that distinction is the whole difference between a recoverable
+ *        stumble and an abandoned demo.
+ * ======================================================================== */
+
+interface UpstreamFailure {
+  /** Status to return to the client. */
+  status: number;
+  /** Safe to display. Contains no model output and no credential. */
+  message: string;
+}
+
+/** Pull the upstream HTTP code out of whatever shape the SDK threw. */
+function extractUpstreamCode(error: any): number | null {
+  if (typeof error?.status === 'number') return error.status;
+  if (typeof error?.code === 'number') return error.code;
+  // The SDK commonly stringifies the upstream JSON envelope into .message.
+  if (typeof error?.message === 'string') {
+    try {
+      const parsed = JSON.parse(error.message);
+      const code = parsed?.error?.code;
+      if (typeof code === 'number') return code;
+    } catch {
+      const match = error.message.match(/\b(4\d{2}|5\d{2})\b/);
+      if (match) return Number(match[1]);
+    }
+  }
+  return null;
+}
+
+function mapUpstreamFailure(error: any): UpstreamFailure {
+  if (error instanceof Error && error.message.includes('GEMINI_API_KEY is not configured')) {
+    return {
+      status: 503,
+      message: 'The forensics engine has no API key configured. Analysis is unavailable.',
+    };
+  }
+
+  switch (extractUpstreamCode(error)) {
+    case 429:
+      return {
+        status: 429,
+        message:
+          'The analysis quota for this key is exhausted. Wait before retrying, or use Demo Mode.',
+      };
+    case 503:
+      return {
+        status: 503,
+        message:
+          `The model (${GEMINI_MODEL}) is busy and refused the request. This is usually temporary — retry, ` +
+          'or set GEMINI_MODEL to another available model and restart.',
+      };
+    case 500:
+    case 502:
+    case 504:
+      return {
+        status: 502,
+        message: 'The model failed to complete the analysis. Retrying often succeeds.',
+      };
+    case 400:
+      return {
+        status: 400,
+        message:
+          'The model rejected this evidence. Check that the file is a real image and that its type was sent correctly.',
+      };
+    case 404:
+      return {
+        status: 502,
+        message:
+          `The configured model (${GEMINI_MODEL}) was not found. Check GEMINI_MODEL against /api/health.`,
+      };
+    case 401:
+    case 403:
+      return {
+        status: 502,
+        message: 'The forensics engine could not authenticate with the model provider.',
+      };
+    default:
+      return {
+        status: 502,
+        message: 'The analysis could not be completed.',
+      };
+  }
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -31,7 +132,12 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', engine: 'ANAMNESIS v3.4 Forensics Engine', timestamp: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      engine: 'ANAMNESIS v3.4 Forensics Engine',
+      model: GEMINI_MODEL,
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // Forensic Analysis endpoint
@@ -101,7 +207,7 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: GEMINI_MODEL,
         contents,
         config: {
           systemInstruction: `You are ANAMNESIS, the uncompromising digital crime-scene media forensics engine for OSINT, law enforcement, and investigative journalism. Your mission is to reconstruct forensic truth, decouple media from deceptive narratives, and provide deterministic evidence chains. Always respond with strict, valid JSON matching the requested ANAMNESIS forensic format.`,
@@ -238,8 +344,13 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
       try {
         parsedData = JSON.parse(rawText);
       } catch (err) {
-        console.error('Failed to parse Gemini JSON output:', rawText);
-        return res.status(500).json({ error: 'Forensics parsing error', raw: rawText });
+        // G16: raw output is logged, never returned. Echoing it back put
+        // unvalidated model text on the investigator's screen.
+        console.error('Failed to parse Gemini JSON output. Raw text follows:');
+        console.error(rawText);
+        return res.status(502).json({
+          error: 'The model returned a malformed report. Retry the analysis.',
+        });
       }
 
       // Ensure evidence ID and hash are preserved if provided
@@ -249,10 +360,10 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
 
       res.json(parsedData);
     } catch (error: any) {
+      // Full detail to the log; only the mapped, safe message to the client.
       console.error('Error during forensic analysis:', error);
-      res.status(500).json({
-        error: error.message || 'Internal server error in forensic engine',
-      });
+      const failure = mapUpstreamFailure(error);
+      res.status(failure.status).json({ error: failure.message });
     }
   });
 
@@ -288,7 +399,7 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: GEMINI_MODEL,
         contents,
         config: {
           systemInstruction: systemPrompt,
@@ -298,7 +409,8 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       res.json({ reply: response.text });
     } catch (error: any) {
       console.error('Error in forensic chat:', error);
-      res.status(500).json({ error: error.message || 'Failed to process inquiry.' });
+      const failure = mapUpstreamFailure(error);
+      res.status(failure.status).json({ error: failure.message });
     }
   });
 
@@ -319,6 +431,8 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ANAMNESIS Server running on http://0.0.0.0:${PORT}`);
+    console.log(`ANAMNESIS model:   ${GEMINI_MODEL}`);
+    console.log(`ANAMNESIS API key: ${process.env.GEMINI_API_KEY ? 'configured' : 'MISSING - analysis will fail'}`);
   });
 }
 

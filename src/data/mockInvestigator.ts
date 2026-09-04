@@ -115,10 +115,52 @@ export function loadSavedCasesFromStorage(investigatorId: string): SavedCase[] {
   return getDefaultDemoCases(investigatorId);
 }
 
-export function saveCasesToStorage(investigatorId: string, cases: SavedCase[]) {
+/* G18: media bytes are never persisted.
+ *
+ * previewUrl and mediaUrl hold full base64 data URLs. Writing them into
+ * localStorage blows the ~5 MB quota on the first real photograph, and the
+ * failure used to be swallowed by a console.error — the investigator's case
+ * simply vanished on reload with no indication why. The bytes live in memory
+ * for the session; everything else round-trips.
+ */
+function toPersistable(saved: SavedCase): SavedCase {
+  return {
+    ...saved,
+    caseState: {
+      ...saved.caseState,
+      ingest: {
+        ...saved.caseState.ingest,
+        mediaUrl: '',
+        previewUrl: '',
+      },
+    },
+  };
+}
+
+/**
+ * Persist the investigator's cases.
+ *
+ * Returns null on success, or a human-readable reason on failure. The caller
+ * must surface that reason: silent persistence loss during a demonstration is
+ * worse than an honest warning.
+ */
+export function saveCasesToStorage(
+  investigatorId: string,
+  cases: SavedCase[]
+): string | null {
   try {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}${investigatorId}`, JSON.stringify(cases));
+    localStorage.setItem(
+      `${STORAGE_KEY_PREFIX}${investigatorId}`,
+      JSON.stringify(cases.map(toPersistable))
+    );
+    return null;
   } catch (err) {
     console.error('Failed to save cases to localStorage:', err);
+    const isQuota =
+      err instanceof DOMException &&
+      (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED');
+    return isQuota
+      ? 'Browser storage is full, so this case was not saved. Export the dossier before navigating away.'
+      : 'This case could not be saved to browser storage. Export the dossier before navigating away.';
   }
 }

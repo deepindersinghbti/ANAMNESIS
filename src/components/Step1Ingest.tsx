@@ -15,79 +15,116 @@ import { BENCHMARK_CASES } from '../data/benchmarkCases';
 import { MediaIntakeData } from '../types';
 import { soundFx } from '../lib/soundFx';
 
+/** The limit the dropzone advertises, now actually enforced. */
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const ACCEPTED_TYPE_PREFIXES = ['image/', 'video/'];
+
 interface Step1IngestProps {
-  onComplete: (intake: MediaIntakeData, imageBase64?: string) => void;
+  onComplete: (intake: MediaIntakeData, imageBase64?: string, mimeType?: string) => void;
   initialIntake?: MediaIntakeData;
+  isAnalysing?: boolean;
 }
 
 export const Step1Ingest: React.FC<Step1IngestProps> = ({
   onComplete,
   initialIntake,
+  isAnalysing = false,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [fileName, setFileName] = useState(initialIntake?.fileName || 'tsunami_jakarta_viral_clip.mp4');
-  const [fileSize, setFileSize] = useState(initialIntake?.fileSize || 18432000);
-  const [fileHash, setFileHash] = useState(
-    initialIntake?.fileHashSha256 || 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-  );
-  const [previewUrl, setPreviewUrl] = useState(
-    initialIntake?.previewUrl || BENCHMARK_CASES[0].intake.previewUrl
-  );
+  /* G2: every field below starts empty. It previously opened pre-filled with
+   * a tsunami filename, a Jakarta location, a benchmark preview raster and a
+   * hash of e3b0c442…b855 — which is the SHA-256 of the empty string, shown
+   * beside a green VERIFIED chip. That was a fabricated measurement on the
+   * first screen of the application. Demo Mode still loads a benchmark, but
+   * only when the investigator explicitly picks one. */
+  const [fileName, setFileName] = useState(initialIntake?.fileName || '');
+  const [fileSize, setFileSize] = useState(initialIntake?.fileSize || 0);
+  const [fileHash, setFileHash] = useState(initialIntake?.fileHashSha256 || '');
+  const [previewUrl, setPreviewUrl] = useState(initialIntake?.previewUrl || '');
   const [imageBase64, setImageBase64] = useState<string | undefined>(undefined);
   const [exifTags, setExifTags] = useState<Record<string, any>>(initialIntake?.exifData || {});
 
-  const [claimedLocation, setClaimedLocation] = useState(
-    initialIntake?.claimedLocation || 'Jakarta Coast, Indonesia'
-  );
-  const [claimedDateTime, setClaimedDateTime] = useState(
-    initialIntake?.claimedDateTime || '2026-08-14 09:30 UTC'
-  );
-  const [claimedNarrative, setClaimedNarrative] = useState(
-    initialIntake?.claimedNarrative ||
-      'Massive tsunami inundation hits central coastal infrastructure following 7.8M earthquake.'
-  );
-  const [sourcePlatform, setSourcePlatform] = useState(
-    initialIntake?.sourcePlatform || 'X (Twitter) Viral Post'
-  );
-  const [sourceUrl, setSourceUrl] = useState(
-    initialIntake?.sourceUrl || 'https://x.com/viral_news_tracker/status/1948201948'
-  );
+  const [claimedLocation, setClaimedLocation] = useState(initialIntake?.claimedLocation || '');
+  const [claimedDateTime, setClaimedDateTime] = useState(initialIntake?.claimedDateTime || '');
+  const [claimedNarrative, setClaimedNarrative] = useState(initialIntake?.claimedNarrative || '');
+  const [sourcePlatform, setSourcePlatform] = useState(initialIntake?.sourcePlatform || '');
+  const [sourceUrl, setSourceUrl] = useState(initialIntake?.sourceUrl || '');
+  const [isPrecomputed, setIsPrecomputed] = useState(false);
 
   const [isDragging, setIsDragging] = useState(false);
   const [isComputingHash, setIsComputingHash] = useState(false);
-  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string>(BENCHMARK_CASES[0].id);
+  const [mimeType, setMimeType] = useState<string>('');
+  const [intakeError, setIntakeError] = useState<string | null>(null);
+  const [selectedBenchmarkId, setSelectedBenchmarkId] = useState<string>('');
+
+  /** Promisified FileReader. The callback form cannot be awaited, and the
+   *  original code did not try — it cleared the "computing" flag while both
+   *  reads were still outstanding. */
+  const readAs = <T extends string | ArrayBuffer>(
+    file: File,
+    as: 'dataURL' | 'arrayBuffer'
+  ): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as T);
+      reader.onerror = () => reject(reader.error ?? new Error('File could not be read.'));
+      if (as === 'dataURL') reader.readAsDataURL(file);
+      else reader.readAsArrayBuffer(file);
+    });
 
   const handleFile = async (file: File) => {
     if (!file) return;
+
+    // G23: the dropzone advertises a limit, so enforce it before hashing.
+    if (file.size > MAX_FILE_BYTES) {
+      setIntakeError(
+        `${file.name} is ${formatBytes(file.size)}. The limit is ${formatBytes(MAX_FILE_BYTES)}.`
+      );
+      return;
+    }
+    if (!ACCEPTED_TYPE_PREFIXES.some((prefix) => file.type.startsWith(prefix))) {
+      setIntakeError(
+        `${file.name} is ${file.type || 'of an unrecognised type'}. Accepted: image or video files.`
+      );
+      return;
+    }
+
+    setIntakeError(null);
     setFileName(file.name);
     setFileSize(file.size);
+    // G17: the server must not have to guess the mime type.
+    setMimeType(file.type);
     setIsComputingHash(true);
 
     try {
-      const hash = await calculateSha256(file);
+      /* G24: all three reads settle before the UI stops saying COMPUTING.
+       * Previously the hash chip flipped to VERIFIED while imageBase64 was
+       * still undefined — submitting in that window posted the claimed
+       * context with no image, and the model answered about a picture it
+       * had never received. */
+      const [hash, dataUrl, buffer] = await Promise.all([
+        calculateSha256(file),
+        readAs<string>(file, 'dataURL'),
+        readAs<ArrayBuffer>(file, 'arrayBuffer'),
+      ]);
+
       setFileHash(hash);
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = e.target?.result as string;
-        setPreviewUrl(result);
-        setImageBase64(result);
-      };
-      reader.readAsDataURL(file);
-
-      const bufferReader = new FileReader();
-      bufferReader.onload = (e) => {
-        const buffer = e.target?.result as ArrayBuffer;
-        if (buffer) {
-          const dataView = new DataView(buffer);
-          const parsed = extractExifFromDataView(dataView);
-          setExifTags(parsed);
-        }
-      };
-      bufferReader.readAsArrayBuffer(file);
+      setPreviewUrl(dataUrl);
+      setImageBase64(dataUrl);
+      setExifTags(extractExifFromDataView(new DataView(buffer)));
     } catch (err) {
       console.error('Error processing file intake:', err);
+      setIntakeError(
+        `${file.name} could not be read. Try re-selecting the file.`
+      );
+      // Leave nothing half-populated: a stale hash beside a new file name
+      // would be a fabricated measurement.
+      setFileHash('');
+      setPreviewUrl('');
+      setImageBase64(undefined);
+      setMimeType('');
+      setExifTags({});
     } finally {
       setIsComputingHash(false);
     }
@@ -108,11 +145,25 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
       setSourcePlatform(benchmark.intake.sourcePlatform);
       setSourceUrl(benchmark.intake.sourceUrl || '');
       setExifTags(benchmark.intake.exifData || {});
+      /* Demo Mode. The badge is not decoration: these previews are SVG
+       * fixtures, not photographs, and the case must never be mistaken for
+       * a live result. */
+      setIsPrecomputed(true);
+      setImageBase64(undefined);
+      setMimeType('');
+      setIntakeError(null);
     }
   };
 
+  const hasMedia = Boolean(fileHash && (imageBase64 || isPrecomputed));
+  const canSubmit = hasMedia && !isComputingHash && !isAnalysing;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canSubmit) {
+      setIntakeError('Select a media file, or choose a benchmark case, before completing Step 1.');
+      return;
+    }
     const evidenceId = initialIntake?.evidenceId || `EVD-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const intakeData: MediaIntakeData = {
@@ -133,7 +184,8 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
       uploadTimestamp: new Date().toISOString(),
     };
 
-    onComplete(intakeData, imageBase64);
+    // G22/G17: both the bytes and the mime type reach the caller.
+    onComplete(intakeData, imageBase64, mimeType);
   };
 
   return (
@@ -161,6 +213,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
             aria-label="Select benchmark test scenario"
             className="text-xs font-mono bg-zinc-900 border border-zinc-700 text-zinc-200 rounded-lg px-2.5 py-1.5 outline-none focus:border-purple-500 cursor-pointer"
           >
+            <option value="">- none (live intake) -</option>
             {BENCHMARK_CASES.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.title}
@@ -170,26 +223,72 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
         </div>
       </div>
 
-      {/* 3-SECOND KEY FINDING BANNER */}
-      <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+      {/* INTAKE STATUS. Reports what has actually happened to the file.
+          Nothing here may read as a verdict before a file exists. */}
+      <div
+        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+          hasMedia ? 'bg-purple-950/40 border-purple-500/50' : 'bg-zinc-950/60 border-zinc-800'
+        }`}
+      >
         <div className="space-y-1">
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-purple-400 block">
-            KEY FINDING
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400 block">
+            INTAKE STATUS
           </span>
           <h3 className="text-base sm:text-lg font-black font-mono text-white">
-            Media target loaded &amp; SHA-256 cryptographically indexed
+            {isComputingHash
+              ? 'Hashing and reading file…'
+              : hasMedia
+              ? 'Media loaded & SHA-256 computed in this browser'
+              : 'No media loaded'}
           </h3>
           <p className="text-xs text-zinc-300 font-sans">
-            Ready to initialize evidence record: <strong className="text-white font-mono">{fileName}</strong> ({formatBytes(fileSize)})
+            {hasMedia ? (
+              <>
+                Evidence record: <strong className="text-white font-mono">{fileName}</strong>
+                {fileSize > 0 && <> ({formatBytes(fileSize)})</>}
+              </>
+            ) : (
+              <>Drop a file to hash and inspect it locally. Nothing is uploaded until you complete this step.</>
+            )}
           </p>
         </div>
-        <div className="shrink-0">
-          <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-emerald-950 border border-emerald-600 text-emerald-300 flex items-center gap-1.5">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>🟢 READY FOR INGEST</span>
+        <div className="shrink-0 flex flex-col items-end gap-1.5">
+          {isPrecomputed && (
+            <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-amber-950 border border-amber-600 text-amber-300 flex items-center gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>PRECOMPUTED REFERENCE CASE</span>
+            </span>
+          )}
+          <span
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 ${
+              hasMedia
+                ? 'bg-emerald-950 border border-emerald-600 text-emerald-300'
+                : 'bg-zinc-900 border border-dashed border-zinc-700 text-zinc-500'
+            }`}
+          >
+            {hasMedia ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
+            <span>{hasMedia ? 'READY FOR INGEST' : 'AWAITING MEDIA'}</span>
           </span>
         </div>
       </div>
+
+      {/* Intake rejection: size, type, or an unreadable file. */}
+      {intakeError && (
+        <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-500/50 flex items-start gap-2.5 text-rose-200 font-mono text-xs">
+          <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <strong className="block text-rose-100">FILE REJECTED</strong>
+            <span className="text-rose-300 font-sans">{intakeError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIntakeError(null)}
+            className="px-2 py-0.5 rounded bg-rose-900/80 hover:bg-rose-800 text-rose-100 border border-rose-700/60 font-bold cursor-pointer"
+          >
+            DISMISS
+          </button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -252,7 +351,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                     className="w-full h-full object-contain"
                   />
                 ) : (
-                  <div className="text-zinc-400 font-mono text-xs">No media loaded</div>
+                  <div className="text-zinc-600 font-mono text-xs">NOT_ASSESSED — no media loaded</div>
                 )}
               </div>
             </div>
@@ -264,12 +363,24 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                   <Hash className="w-3.5 h-3.5 text-purple-400" />
                   <span>SHA-256 Hash Digest:</span>
                 </span>
-                <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-emerald-400 font-bold">
-                  {isComputingHash ? 'COMPUTING...' : 'VERIFIED'}
+                <span
+                  className={`text-[10px] px-2 py-0.5 rounded border font-bold ${
+                    isComputingHash
+                      ? 'bg-zinc-900 border-zinc-700 text-amber-300'
+                      : fileHash
+                      ? 'bg-zinc-900 border-zinc-700 text-emerald-400'
+                      : 'bg-zinc-900 border-dashed border-zinc-700 text-zinc-500'
+                  }`}
+                >
+                  {isComputingHash ? 'COMPUTING…' : fileHash ? 'COMPUTED' : 'NOT ASSESSED'}
                 </span>
               </div>
-              <div className="p-2 rounded bg-black border border-zinc-800 text-[10px] text-zinc-300 break-all select-all font-mono">
-                {fileHash}
+              <div
+                className={`p-2 rounded bg-black border border-zinc-800 text-[10px] break-all select-all font-mono ${
+                  fileHash ? 'text-zinc-300' : 'text-zinc-600'
+                }`}
+              >
+                {fileHash || 'NOT_ASSESSED — no file hashed yet'}
               </div>
             </div>
           </div>
@@ -352,9 +463,20 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
           <button
             type="submit"
             id="btn-complete-step1"
-            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            disabled={!canSubmit}
+            className={`w-full sm:w-auto px-6 py-2.5 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-center gap-2 shadow-md ${
+              canSubmit
+                ? 'bg-purple-600 hover:bg-purple-500 text-white cursor-pointer'
+                : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+            }`}
           >
-            <span>COMPLETE STEP 1 →</span>
+            <span>
+              {isAnalysing
+                ? 'ANALYSING…'
+                : isComputingHash
+                ? 'READING FILE…'
+                : 'COMPLETE STEP 1 & ANALYSE →'}
+            </span>
             <ArrowRight className="w-4 h-4" />
           </button>
         </div>
