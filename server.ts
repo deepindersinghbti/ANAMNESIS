@@ -12,6 +12,64 @@ dotenv.config();
  * right?" is answerable with one curl rather than by watching a demo fail. */
 const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.7-flash';
 
+/* The Gemini adapter's timeout, per the target architecture. Without it the
+ * upstream call had no deadline at all: the browser gave up at 30 seconds
+ * while the server went on holding the connection — measured at 142 seconds
+ * against a congested model before it finally returned 503.
+ *
+ * Keep this in step with REQUEST_TIMEOUT_MS in src/lib/api.ts. If the server
+ * budget is the larger of the two, the browser aborts first and the server
+ * keeps working on a result nobody will read. */
+/* The API rejects deadlines under ten seconds outright — "Manually set
+ * deadline 2s is too short. Minimum allowed deadline is 10s." — so a value
+ * below the floor would turn every analysis into an INVALID_ARGUMENT rather
+ * than the snappier failure the author intended. Clamp and say so. */
+const GEMINI_MIN_TIMEOUT_MS = 10_000;
+const requestedTimeout = Number(process.env.GEMINI_TIMEOUT_MS) || 30_000;
+const GEMINI_TIMEOUT_MS = Math.max(requestedTimeout, GEMINI_MIN_TIMEOUT_MS);
+
+/**
+ * An abort signal for one upstream call.
+ *
+ * Fires on whichever comes first: the timeout above, or the investigator
+ * navigating away / the browser's own 30s abort. The second case is the one
+ * that matters in practice — a disconnected client used to leave the model
+ * call running to completion.
+ *
+ * Note the SDK's own caveat: aborting is a client-side operation. It frees
+ * this process immediately but does not cancel work already accepted
+ * upstream, and does not avoid being billed for it.
+ */
+function requestAbort(
+  res: express.Response
+): { signal: AbortSignal; timedOut: () => boolean; dispose: () => void } {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, GEMINI_TIMEOUT_MS);
+
+  /* Listen on the response, not the request. For a POST the request stream
+   * is consumed and destroyed as soon as the body is read, so req 'close'
+   * fires on every normal request and would abort all of them. The response
+   * closes early only when the client has genuinely gone away. */
+  const onClientGone = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on('close', onClientGone);
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer);
+      res.off('close', onClientGone);
+    },
+  };
+}
+
 /* ===========================================================================
  * UPSTREAM ERROR MAPPING
  *
@@ -52,7 +110,21 @@ function extractUpstreamCode(error: any): number | null {
   return null;
 }
 
-function mapUpstreamFailure(error: any): UpstreamFailure {
+function mapUpstreamFailure(error: any, timedOut = false): UpstreamFailure {
+  const aborted =
+    timedOut ||
+    error?.name === 'AbortError' ||
+    (typeof error?.message === 'string' && /abort|timeout|timed out/i.test(error.message));
+
+  if (aborted) {
+    return {
+      status: 504,
+      message:
+        `The model did not respond within ${Math.round(GEMINI_TIMEOUT_MS / 1000)} seconds and the request was cancelled. ` +
+        'Retry, or raise GEMINI_TIMEOUT_MS if this happens consistently.',
+    };
+  }
+
   if (error instanceof Error && error.message.includes('GEMINI_API_KEY is not configured')) {
     return {
       status: 503,
@@ -136,12 +208,14 @@ async function startServer() {
       status: 'ok',
       engine: 'ANAMNESIS v3.4 Forensics Engine',
       model: GEMINI_MODEL,
+      timeoutMs: GEMINI_TIMEOUT_MS,
       timestamp: new Date().toISOString(),
     });
   });
 
   // Forensic Analysis endpoint
   app.post('/api/forensics/analyze', async (req, res) => {
+    const abort = requestAbort(res);
     try {
       const {
         imageBase64,
@@ -210,6 +284,8 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
         model: GEMINI_MODEL,
         contents,
         config: {
+          abortSignal: abort.signal,
+          httpOptions: { timeout: GEMINI_TIMEOUT_MS },
           systemInstruction: `You are ANAMNESIS, the uncompromising digital crime-scene media forensics engine for OSINT, law enforcement, and investigative journalism. Your mission is to reconstruct forensic truth, decouple media from deceptive narratives, and provide deterministic evidence chains. Always respond with strict, valid JSON matching the requested ANAMNESIS forensic format.`,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -362,13 +438,17 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
     } catch (error: any) {
       // Full detail to the log; only the mapped, safe message to the client.
       console.error('Error during forensic analysis:', error);
-      const failure = mapUpstreamFailure(error);
+      if (res.headersSent || res.writableEnded) return;
+      const failure = mapUpstreamFailure(error, abort.timedOut());
       res.status(failure.status).json({ error: failure.message });
+    } finally {
+      abort.dispose();
     }
   });
 
   // Forensic Cross-Examination Chat endpoint
   app.post('/api/forensics/chat', async (req, res) => {
+    const abort = requestAbort(res);
     try {
       const { message, reportContext, imageBase64, mimeType } = req.body;
       const ai = getGeminiClient();
@@ -402,6 +482,8 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
         model: GEMINI_MODEL,
         contents,
         config: {
+          abortSignal: abort.signal,
+          httpOptions: { timeout: GEMINI_TIMEOUT_MS },
           systemInstruction: systemPrompt,
         },
       });
@@ -409,8 +491,11 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       res.json({ reply: response.text });
     } catch (error: any) {
       console.error('Error in forensic chat:', error);
-      const failure = mapUpstreamFailure(error);
+      if (res.headersSent || res.writableEnded) return;
+      const failure = mapUpstreamFailure(error, abort.timedOut());
       res.status(failure.status).json({ error: failure.message });
+    } finally {
+      abort.dispose();
     }
   });
 
@@ -432,6 +517,12 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ANAMNESIS Server running on http://0.0.0.0:${PORT}`);
     console.log(`ANAMNESIS model:   ${GEMINI_MODEL}`);
+    console.log(`ANAMNESIS timeout: ${GEMINI_TIMEOUT_MS}ms per model call`);
+    if (requestedTimeout < GEMINI_MIN_TIMEOUT_MS) {
+      console.warn(
+        `ANAMNESIS warning: GEMINI_TIMEOUT_MS=${requestedTimeout} is below the API minimum of ${GEMINI_MIN_TIMEOUT_MS}ms and was raised to ${GEMINI_TIMEOUT_MS}ms.`
+      );
+    }
     console.log(`ANAMNESIS API key: ${process.env.GEMINI_API_KEY ? 'configured' : 'MISSING - analysis will fail'}`);
   });
 }
