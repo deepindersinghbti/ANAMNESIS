@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
@@ -598,6 +597,12 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
    * Vite dev server in production. Inverting it makes the safe path the one
    * that happens by accident. */
   if (process.env.NODE_ENV === 'development') {
+    /* Imported lazily and only on the development branch. A top-level import
+     * compiles to `require("vite")` at module scope, which meant the
+     * production server could not boot unless the whole Vite toolchain was
+     * installed beside it — so the runtime image had to ship a build tool,
+     * and pruning devDependencies broke startup with a module-not-found. */
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
