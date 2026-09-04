@@ -22,6 +22,7 @@ import { isAssessed, NOT_ASSESSED, PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
 import { soundFx } from '../lib/soundFx';
+import { getStatusBadge } from '../lib/statusStyles';
 
 interface Step4InvestigateProps {
   caseState: PersistentCaseState;
@@ -94,19 +95,6 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
   };
 
   const activeStage = forensicReplay[activeStageIdx] || forensicReplay[0];
-
-  const getStatusBadge = (status: string) => {
-    if (status.includes('Consistent') || status.includes('🟢') || status.includes('Untampered')) {
-      return 'bg-emerald-950/80 border-emerald-700 text-emerald-300';
-    }
-    if (status.includes('Inconsistent') || status.includes('🔴')) {
-      return 'bg-rose-950/80 border-rose-700 text-rose-300 animate-pulse';
-    }
-    if (status.includes('Needs') || status.includes('🟠')) {
-      return 'bg-amber-950/80 border-amber-700 text-amber-300';
-    }
-    return 'bg-blue-950/80 border-blue-700 text-blue-300';
-  };
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-[#0d0d14] p-5 sm:p-6 space-y-5 shadow-xl">

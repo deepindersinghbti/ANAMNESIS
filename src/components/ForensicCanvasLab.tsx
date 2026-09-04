@@ -235,7 +235,7 @@ export const ForensicCanvasLab: React.FC<ForensicCanvasLabProps> = ({
     const canvas = displayCanvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
-    link.download = `ANAMESIS_${evidenceId}_${activeFilter.toUpperCase()}_FILTER.png`;
+    link.download = `ANAMNESIS_${evidenceId}_${activeFilter.toUpperCase()}_FILTER.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };

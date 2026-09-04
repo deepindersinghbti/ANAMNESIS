@@ -29,7 +29,7 @@ export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      content: `ANAMESIS Cross-Examiner online for Case **${report.case_summary.evidence_id}**.\n\nI have evaluated the evidence against the 5 Core Questions. You can ask me to probe specific visual inconsistencies, analyze shadow/lighting physics, generate OSINT geolocation confirmation checklists, or formulate legal admissibility briefs.`,
+      content: `ANAMNESIS Cross-Examiner online for Case **${report.case_summary.evidence_id}**.\n\nI have evaluated the evidence against the 5 Core Questions. You can ask me to probe specific visual inconsistencies, analyze shadow/lighting physics, generate OSINT geolocation confirmation checklists, or formulate legal admissibility briefs.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -146,7 +146,7 @@ export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
               }`}
             >
               <div className="flex items-center justify-between gap-4 text-[10px] text-zinc-400 font-mono border-b border-zinc-800/80 pb-1">
-                <span className="font-bold text-pink-300">{m.role === 'user' ? 'INVESTIGATOR' : 'ANAMESIS ENGINE'}</span>
+                <span className="font-bold text-pink-300">{m.role === 'user' ? 'INVESTIGATOR' : 'ANAMNESIS ENGINE'}</span>
                 <span>{m.timestamp}</span>
               </div>
               <div className="whitespace-pre-wrap leading-relaxed text-xs">{m.content}</div>

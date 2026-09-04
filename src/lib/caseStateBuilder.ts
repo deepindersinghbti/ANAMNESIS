@@ -21,20 +21,12 @@ import {
  *              the explicit NOT_ASSESSED sentinel. It may never originate
  *              a fact.
  *
- * The null branch below satisfies all three. The analysed branch is total
- * and pure but not yet honest: it still carries authored constants that
- * Phase 2 removes (ledger row G3). They are marked INVENTED so the deletion
- * pass has an unambiguous worklist.
+ * Both branches satisfy all three. Where a comment below says a field is
+ * not measured, that is a statement about the forensic schema rather than a
+ * placeholder: the model returns no per-copy lineage, no acoustic envelope
+ * and no container metadata, so those fields are gaps and stay gaps until
+ * something actually measures them.
  * ========================================================================= */
-
-/** Per-copy lineage detail the forensic schema does not return. */
-const UNMEASURED_NODE_DETAIL = {
-  label: NOT_ASSESSED,
-  description: NOT_ASSESSED,
-  mutationType: NOT_ASSESSED,
-  generation: NOT_ASSESSED,
-  timestamp: NOT_ASSESSED,
-} as const;
 
 /**
  * A case that carries real intake measurements and nothing else.
@@ -196,24 +188,26 @@ export function buildCaseState(
         chromaticAberration: tech?.chromatic_aberration_consistency ?? NOT_ASSESSED,
         lightingConsistency: tech?.lighting_vector_consistency ?? NOT_ASSESSED,
         shadowSunAngleMatch: tech?.shadow_sun_angle_match ?? NOT_ASSESSED,
-        confidence: NOT_ASSESSED, // INVENTED (G3): was a literal 0.91.
+        confidence: NOT_ASSESSED,
       },
       audio: {
-        // INVENTED (G3): the whole audio block below is authored. The
-        // forensic schema returns only audio_integrity_status.
-        audioCharacteristics: 'Acoustic background frequency stream and speech envelope analysis',
+        /* The schema returns exactly one audio field: audio_integrity_status.
+         * Everything else an audio panel might want — envelope, reverb,
+         * electrical network frequency, a confidence — is not measured
+         * anywhere in this system, so none of it is claimed. */
+        audioCharacteristics: NOT_ASSESSED,
         audioIndicators: [`Integrity status: ${ctx.audio_integrity_status}`],
-        enfStatus: NOT_ASSESSED, // INVENTED (G3): was '50.02 Hz Stable'.
+        enfStatus: NOT_ASSESSED,
         acousticEnvelope: NOT_ASSESSED,
         ambientReverbConsistency: NOT_ASSESSED,
-        confidence: NOT_ASSESSED, // INVENTED (G3): was a literal 0.88.
+        confidence: NOT_ASSESSED,
       },
       structural: {
-        // INVENTED (G3): nothing measures the container or colour primaries.
+        // Nothing measures the container format or colour primaries.
         streamCharacteristics: NOT_ASSESSED,
         compressionGenerations: tech?.compression_generations ?? NOT_ASSESSED,
         metadataTamperFlag: tech?.metadata_tamper_flag ?? NOT_ASSESSED,
-        confidence: NOT_ASSESSED, // INVENTED (G3): was a literal 0.94.
+        confidence: NOT_ASSESSED,
       },
       manipulation: {
         mutationsDetected: q.what_changed.mutations_detected,
@@ -221,14 +215,15 @@ export function buildCaseState(
         manipulationConfidence: manipulationScore,
         status: manipulationStatus,
       },
-      // INVENTED (G3): sourceCompleteness was a fully authored block —
-      // a 12.4-second duration, four detected indicators and a 0.86
-      // confidence, none of them measured. Omitted; the field is optional.
+      /* sourceCompleteness is omitted. Establishing whether a clip is an
+       * extract requires the full source, which the system never has. The
+       * field is optional precisely so this can be absent rather than
+       * guessed at. */
     },
     relationships: {
-      // INVENTED (G3): the fourteen related copies and the five lineage
-      // nodes below were authored. The schema returns no per-copy data,
-      // only how_it_spread.estimated_generations.
+      /* No per-copy lineage is available. The schema returns a generation
+       * estimate and free-text notes, but nothing that identifies an
+       * individual related copy, so there are no nodes to show. */
       totalRelatedFound: NOT_ASSESSED,
       nodes: [],
       lineageHierarchy: [],
@@ -258,7 +253,7 @@ export function buildCaseState(
         what: q.what_changed,
         how: q.how_it_spread,
         source: {
-          // INVENTED (G3): was a hardcoded Palu / Sulawesi archive literal.
+          // No reverse-image search runs, so the earliest source is unknown.
           earliestKnownSource: NOT_ASSESSED,
           platform: intake.sourcePlatform || NOT_ASSESSED,
         },
@@ -267,7 +262,7 @@ export function buildCaseState(
         evidenceId: report.case_summary.evidence_id,
         sha256: report.case_summary.primary_hash_sha256,
         findings: report.case_summary.verdict_summary,
-        // INVENTED (G3): the five confidence scores here were authored.
+        // Per-dimension confidence is not part of the schema.
         confidenceScores: {},
         // Pure: derived from intake, not from the clock.
         processingHistory: [

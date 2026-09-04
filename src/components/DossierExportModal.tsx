@@ -32,7 +32,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(report, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `ANAMESIS_REPORT_${report.case_summary.evidence_id}.json`);
+    downloadAnchor.setAttribute('download', `ANAMNESIS_REPORT_${report.case_summary.evidence_id}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -50,7 +50,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
       doc.setFont('courier', 'bold');
       doc.setFontSize(18);
       doc.setTextColor(236, 72, 153); // Pink / Magenta
-      doc.text('ANAMESIS FORENSIC CASE DOSSIER', 14, 18);
+      doc.text('ANAMNESIS FORENSIC CASE DOSSIER', 14, 18);
 
       doc.setFontSize(10);
       doc.setTextColor(203, 213, 225);
@@ -150,11 +150,11 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('courier', 'bold');
       doc.setFontSize(8);
-      doc.text(`CRYPTOGRAPHIC SEAL: SHA256-ANAMESIS-VERIFIED // CHAIN OF CUSTODY CERTIFIED`, 14, yPos);
+      doc.text(`CRYPTOGRAPHIC SEAL: SHA256-ANAMNESIS-VERIFIED // CHAIN OF CUSTODY CERTIFIED`, 14, yPos);
       yPos += 4;
-      doc.text(`EXAMINED VIA ANAMESIS MULTIMODAL FORENSICS ENGINE v2.4`, 14, yPos);
+      doc.text(`EXAMINED VIA ANAMNESIS MULTIMODAL FORENSICS ENGINE v2.4`, 14, yPos);
 
-      doc.save(`ANAMESIS_DOSSIER_${report.case_summary.evidence_id}.pdf`);
+      doc.save(`ANAMNESIS_DOSSIER_${report.case_summary.evidence_id}.pdf`);
     } catch (err) {
       console.error('PDF generation error:', err);
     }
@@ -170,7 +170,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-mono font-black logo-gradient-text uppercase">
-                  ANAMESIS FORENSIC CASE DOSSIER
+                  ANAMNESIS FORENSIC CASE DOSSIER
                 </h2>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-[#ec4899]/20 border border-[#ec4899]/40 text-pink-300 font-mono font-bold">
                   {report.case_summary.evidence_id}
@@ -294,7 +294,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
           <div className="p-4 rounded-2xl border border-dashed border-zinc-800 bg-[#06060c] flex flex-wrap items-center justify-between gap-4 text-[11px] text-zinc-400">
             <div className="flex items-center gap-2">
               <Award className="w-5 h-5 text-[#ec4899]" />
-              <span>DIGITALLY SIGNED &amp; SEALED BY ANAMESIS ENGINE</span>
+              <span>DIGITALLY SIGNED &amp; SEALED BY ANAMNESIS ENGINE</span>
             </div>
             <span>STAMP: {report.case_summary.primary_hash_sha256.slice(0, 16)}...</span>
           </div>
