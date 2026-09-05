@@ -10,8 +10,11 @@ Anamnesis is an investigator-assistance platform designed to help analyse suspic
 
 ## 🚀 Live Prototype
 
-[Open Anamnesis]
-https://anamnesis-media-forensics-engine-303426704079.asia-southeast1.run.app
+_Deployment pending._ The earlier hosted build predates the current
+application and is not representative of it. See **[DEPLOY.md](DEPLOY.md)** to
+stand up an instance; the URL will be published here once it is live.
+
+To run it yourself in the meantime, see [Running It](#️-running-it) below.
 
 ## 🚨 Problem
 
