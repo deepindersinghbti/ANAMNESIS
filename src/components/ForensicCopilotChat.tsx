@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { isAssessed, PersistentCaseState } from '../types';
 import { askCrossExaminer, ApiError } from '../lib/api';
+import { renderMarkdown } from '../lib/markdown';
 
 interface ForensicCopilotChatProps {
   /* Step components read PersistentCaseState, never the wire type. */
@@ -204,7 +205,13 @@ export const ForensicCopilotChat: React.FC<ForensicCopilotChatProps> = ({
                 </span>
                 <span>{m.timestamp}</span>
               </div>
-              <div className="whitespace-pre-wrap leading-relaxed text-xs">{m.content}</div>
+              <div className="leading-relaxed text-xs">
+                {m.role === 'assistant' ? (
+                  renderMarkdown(m.content)
+                ) : (
+                  <span className="whitespace-pre-wrap">{m.content}</span>
+                )}
+              </div>
             </div>
 
             {m.role === 'user' && (

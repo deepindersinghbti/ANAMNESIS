@@ -554,6 +554,9 @@ Current Case Report Context:
 ${JSON.stringify(reportContext, null, 2)}
 
 Provide forensic, rigorous, and technically precise answers. Reference Error Level Analysis (ELA), shadow vectors, sun elevation geometry, sensor PRNU noise, JPEG quantization tables, reverse OSINT methods, metadata provenance, and evidentiary chain of custody. Decouple raw visual media from deceptive narrative claims.
+
+RESPONSE FORMAT
+Write for an investigator reading a chat panel, not a paper. Use short paragraphs and, where a list genuinely helps, simple bullets. You may use **bold** for emphasis and short ### headings. Do not use LaTeX, mathematical notation or formulae - express relationships in words. Do not use tables. Keep the answer under roughly 250 words unless the investigator asks for more.
 `;
 
       const contents: any[] = [];
