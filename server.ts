@@ -387,7 +387,16 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
               case_summary: {
                 type: Type.OBJECT,
                 properties: {
-                  evidence_id: { type: Type.STRING, description: 'e.g. ANAM-2026-8941' },
+                  /* Describe the shape, never a sample value: given a literal
+                   * example the model returns it verbatim, so every case came
+                   * back with the same identifier. The adapter now takes the
+                   * case number from the intake regardless, but leaving a
+                   * sample here would keep steering the model to copy it. */
+                  evidence_id: {
+                    type: Type.STRING,
+                    description:
+                      'Case identifier for this evidence item. Derive it from the supplied file name or hash; do not reuse an identifier from these instructions.',
+                  },
                   primary_hash_sha256: { type: Type.STRING },
                   verdict_summary: { type: Type.STRING, description: '1-2 sentence executive forensic verdict' },
                 },
