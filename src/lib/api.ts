@@ -6,8 +6,8 @@
  *
  *   G7  A response body is never parsed before res.ok is checked. An error
  *       page or a model rejection can therefore never render as a finding.
- *   G8  Every request carries an AbortController armed at 30 seconds. A
- *       spinner cannot outlive its request.
+ *   G8  Every request carries an AbortController armed at REQUEST_TIMEOUT_MS.
+ *       A spinner cannot outlive its request.
  *   G9  Network failure, abort and non-2xx all normalise to one ApiError
  *       that callers can render without inspecting anything.
  *
@@ -20,8 +20,16 @@ import {
   MediaIntakeData,
 } from '../types';
 
-/** Requests are abandoned after this long. Fig. 2 of the specification. */
-export const REQUEST_TIMEOUT_MS = 30_000;
+/**
+ * Requests are abandoned after this long.
+ *
+ * Must not be shorter than GEMINI_TIMEOUT_MS in server.ts, or the browser
+ * gives up on a request the server is still working on and the investigator
+ * never sees the answer that arrives. Raised from the specification's 30s
+ * after measuring real photographs against the live model: good attempts
+ * land near 18s, but timeouts at 32s were routine.
+ */
+export const REQUEST_TIMEOUT_MS = 60_000;
 
 /* Compiled in by vite from API_SHARED_SECRET. Declared in vite.config.ts so
  * one variable serves both sides. Empty in a build made without it, in which

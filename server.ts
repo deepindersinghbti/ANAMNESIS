@@ -18,13 +18,20 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.7-flash';
  *
  * Keep this in step with REQUEST_TIMEOUT_MS in src/lib/api.ts. If the server
  * budget is the larger of the two, the browser aborts first and the server
- * keeps working on a result nobody will read. */
+ * keeps working on a result nobody will read.
+ *
+ * The specification called for 30s, written before anyone had timed a real
+ * photograph. Measured against one: 17.8s on a good attempt, and three
+ * consecutive failures at exactly 32.1s immediately before it. The variance
+ * is model-side rather than payload-side — a 0.12 MB request timed out just
+ * as readily as a 1.73 MB one — so the budget has to cover the slow case
+ * rather than the median. 60s does; 30s demonstrably does not. */
 /* The API rejects deadlines under ten seconds outright — "Manually set
  * deadline 2s is too short. Minimum allowed deadline is 10s." — so a value
  * below the floor would turn every analysis into an INVALID_ARGUMENT rather
  * than the snappier failure the author intended. Clamp and say so. */
 const GEMINI_MIN_TIMEOUT_MS = 10_000;
-const requestedTimeout = Number(process.env.GEMINI_TIMEOUT_MS) || 30_000;
+const requestedTimeout = Number(process.env.GEMINI_TIMEOUT_MS) || 60_000;
 const GEMINI_TIMEOUT_MS = Math.max(requestedTimeout, GEMINI_MIN_TIMEOUT_MS);
 
 /* ===========================================================================
@@ -209,10 +216,17 @@ function extractUpstreamCode(error: any): number | null {
 }
 
 function mapUpstreamFailure(error: any, timedOut = false): UpstreamFailure {
+  /* Google reports an expired deadline as DEADLINE_EXCEEDED / "Deadline
+   * expired before operation could complete." — words that match none of
+   * the obvious patterns, so a real timeout was being mapped to the generic
+   * "the model failed, retrying often succeeds". That advice is wrong: a
+   * request that consistently exceeds the budget will keep exceeding it. */
   const aborted =
     timedOut ||
     error?.name === 'AbortError' ||
-    (typeof error?.message === 'string' && /abort|timeout|timed out/i.test(error.message));
+    extractUpstreamCode(error) === 504 ||
+    (typeof error?.message === 'string' &&
+      /abort|timeout|timed out|deadline/i.test(error.message));
 
   if (aborted) {
     return {

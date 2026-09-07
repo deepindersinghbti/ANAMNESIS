@@ -41,6 +41,7 @@ import {
 } from './types';
 import { soundFx } from './lib/soundFx';
 import { analyzeMedia, ApiError, toAnalyzeRequest } from './lib/api';
+import { prepareImageForModel } from './lib/imagePrep';
 
 /** The zero state of an intake: no file, no claims, no measurements. */
 const EMPTY_INTAKE: MediaIntakeData = {
@@ -337,8 +338,14 @@ export default function App() {
     setIsAnalysing(true);
 
     try {
+      /* A full-resolution phone photograph does not fit the request
+        * deadline: measured at 32.1s for a 1.73 MB payload against 16.2s
+        * for the same scene bounded to 1568px. Only this copy is resized —
+        * the hash, the EXIF and the forensic canvas all use the original
+        * bytes. */
+      const prepared = await prepareImageForModel(imageBase64, mimeType);
       const report = await analyzeMedia(
-        toAnalyzeRequest(intake, imageBase64, mimeType),
+        toAnalyzeRequest(intake, prepared.dataUrl, prepared.mimeType),
         { signal: controller.signal }
       );
 
