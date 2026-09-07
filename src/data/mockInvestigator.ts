@@ -38,7 +38,12 @@ export function getDefaultDemoCases(investigatorId: string = DEMO_INVESTIGATOR.i
     BENCHMARK_CASES[0].intake,
     BENCHMARK_CASES[0].precomputedReport
   );
+  /* These three are stored fixtures, not investigations anyone ran. The flag
+   * is what makes the PRECOMPUTED REFERENCE CASE badge appear, and without it
+   * a visitor opening My Cases sees three complete forensic reports that look
+   * like live results. */
   // Customize Case 1 as ANM-0147 at Step 3 (In progress)
+  case1State.ingest.isPrecomputed = true;
   case1State.ingest.evidenceId = 'ANM-0147';
   case1State.report.forensicPackage.evidenceId = 'ANM-0147';
 
@@ -47,6 +52,7 @@ export function getDefaultDemoCases(investigatorId: string = DEMO_INVESTIGATOR.i
     BENCHMARK_CASES[1].precomputedReport
   );
   // Customize Case 2 as ANM-0142 at Step 5 (In progress)
+  case2State.ingest.isPrecomputed = true;
   case2State.ingest.evidenceId = 'ANM-0142';
   case2State.report.forensicPackage.evidenceId = 'ANM-0142';
 
@@ -55,6 +61,7 @@ export function getDefaultDemoCases(investigatorId: string = DEMO_INVESTIGATOR.i
     BENCHMARK_CASES[2].precomputedReport
   );
   // Customize Case 3 as ANM-0138 (Completed)
+  case3State.ingest.isPrecomputed = true;
   case3State.ingest.evidenceId = 'ANM-0138';
   case3State.report.forensicPackage.evidenceId = 'ANM-0138';
 

@@ -414,7 +414,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                   type="text"
                   value={claimedLocation}
                   onChange={(e) => setClaimedLocation(e.target.value)}
-                  placeholder="e.g. Jakarta, Indonesia"
+                  placeholder="City, region or landmark the media is claimed to show"
                   className="w-full text-xs bg-[#0d0d14] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 outline-none focus:border-purple-500"
                   required
                 />
@@ -430,7 +430,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                   type="text"
                   value={claimedDateTime}
                   onChange={(e) => setClaimedDateTime(e.target.value)}
-                  placeholder="e.g. 2026-08-14 09:30 UTC"
+                  placeholder="YYYY-MM-DD HH:MM and timezone"
                   className="w-full text-xs bg-[#0d0d14] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 outline-none focus:border-purple-500"
                   required
                 />
@@ -446,7 +446,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                   type="text"
                   value={sourcePlatform}
                   onChange={(e) => setSourcePlatform(e.target.value)}
-                  placeholder="e.g. X (Twitter), Telegram, WhatsApp"
+                  placeholder="Where the media was received or seen"
                   className="w-full text-xs bg-[#0d0d14] border border-zinc-800 rounded-lg px-2.5 py-1.5 text-zinc-200 outline-none focus:border-purple-500"
                   required
                 />
@@ -461,7 +461,7 @@ export const Step1Ingest: React.FC<Step1IngestProps> = ({
                   rows={2}
                   value={claimedNarrative}
                   onChange={(e) => setClaimedNarrative(e.target.value)}
-                  placeholder="Accompanying caption..."
+                  placeholder="The claim made about this media"
                   className="w-full text-xs font-sans bg-[#0d0d14] border border-zinc-800 rounded-lg p-2 text-zinc-200 outline-none focus:border-purple-500 resize-none"
                   required
                 />
