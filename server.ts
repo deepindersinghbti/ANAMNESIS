@@ -246,10 +246,14 @@ function mapUpstreamFailure(error: any, timedOut = false): UpstreamFailure {
 
   switch (extractUpstreamCode(error)) {
     case 429:
+      /* A 429 is far more often a per-minute rate limit than an exhausted
+       * allowance, and on a paid key "quota exhausted" reads as a billing
+       * problem the investigator cannot fix. Say what is true of both
+       * cases: too many requests, wait, try again. */
       return {
         status: 429,
         message:
-          'The analysis quota for this key is exhausted. Wait before retrying, or use Demo Mode.',
+          'The model provider is limiting requests for this key. Wait a few seconds and retry, or use Demo Mode.',
       };
     case 503:
       return {

@@ -102,7 +102,7 @@ function describeHttpFailure(status: number): string {
     return 'The evidence file is too large for the analysis endpoint.';
   }
   if (status === 429) {
-    return 'The analysis quota is exhausted. Wait before retrying, or use Demo Mode.';
+    return 'Too many requests in a short window. Wait a few seconds and retry, or use Demo Mode.';
   }
   if (status === 503) {
     return 'The model is busy and refused the request. This is usually temporary — retry in a moment.';
