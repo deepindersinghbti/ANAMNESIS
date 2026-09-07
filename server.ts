@@ -42,7 +42,16 @@ const GEMINI_TIMEOUT_MS = Math.max(requestedTimeout, GEMINI_MIN_TIMEOUT_MS);
  * ======================================================================== */
 
 const API_SHARED_SECRET = process.env.API_SHARED_SECRET?.trim() || '';
-const IS_PRODUCTION = process.env.NODE_ENV !== 'development';
+/* Development is either NODE_ENV, or the --dev flag that `npm run dev`
+ * passes. The flag exists because the script is named "dev" and ought to
+ * mean it: relying on NODE_ENV alone meant running the dev script with an
+ * older .env silently produced production behaviour, which fails closed on
+ * every analysis with a 503 and serves a stale dist/ instead of live
+ * source. Setting it inline is not portable across cmd, PowerShell and sh,
+ * so the flag carries it instead of a cross-env dependency. */
+const IS_DEVELOPMENT =
+  process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+const IS_PRODUCTION = !IS_DEVELOPMENT;
 
 function requireSharedSecret(
   req: express.Request,
@@ -608,7 +617,7 @@ Write for an investigator reading a chat panel, not a paper. Use short paragraph
   /* G13: the check was `!== 'production'`, so an unset NODE_ENV booted a
    * Vite dev server in production. Inverting it makes the safe path the one
    * that happens by accident. */
-  if (process.env.NODE_ENV === 'development') {
+  if (IS_DEVELOPMENT) {
     /* Imported lazily and only on the development branch. A top-level import
      * compiles to `require("vite")` at module scope, which meant the
      * production server could not boot unless the whole Vite toolchain was
