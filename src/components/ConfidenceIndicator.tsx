@@ -1,7 +1,8 @@
 import React from 'react';
+import { Assessable, isAssessed } from '../types';
 
 interface ConfidenceIndicatorProps {
-  score: number; // 0 to 100 or 0 to 1
+  score: Assessable<number>; // 0 to 100 or 0 to 1, or the gap sentinel
   label?: string;
   size?: 'sm' | 'md';
   showPercentage?: boolean;
@@ -13,6 +14,30 @@ export const ConfidenceIndicator: React.FC<ConfidenceIndicatorProps> = ({
   size = 'sm',
   showPercentage = true,
 }) => {
+  /* The NOT_ASSESSED appearance: an empty meter, grey, no level word and no
+   * percentage. It must not read as a low score — "we did not measure this"
+   * and "we measured this and it was low" are different claims. */
+  if (!isAssessed(score)) {
+    return (
+      <div
+        className="inline-flex items-center gap-2 font-mono text-xs"
+        title="Not assessed — no measurement or model answer for this field"
+      >
+        {label && <span className="text-zinc-500 text-[10px] uppercase font-bold">{label}</span>}
+        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-zinc-950 border border-dashed border-zinc-700">
+          <div className="flex items-center gap-0.5">
+            <span className="w-1.5 h-2.5 rounded-xs bg-zinc-800" />
+            <span className="w-1.5 h-2.5 rounded-xs bg-zinc-800" />
+            <span className="w-1.5 h-2.5 rounded-xs bg-zinc-800" />
+          </div>
+          <span className="text-[10px] font-bold tracking-wider text-zinc-500">
+            NOT ASSESSED
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   // Normalize score between 0 and 100
   const normalized = score <= 1 ? Math.round(score * 100) : Math.round(score);
 

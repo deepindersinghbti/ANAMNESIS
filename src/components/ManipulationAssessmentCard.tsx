@@ -11,8 +11,14 @@ import {
   CheckCircle2,
   FlaskConical,
 } from 'lucide-react';
-import { ManipulationAssessment, ManipulationTypeClass } from '../types';
 import {
+  Assessable,
+  isAssessed,
+  ManipulationAssessment,
+  ManipulationTypeClass,
+} from '../types';
+import {
+  formatAssessedPct,
   MANIPULATION_SCOPE_NOTE,
   MANIPULATION_TYPE_SHORT,
   manipulationTypeTheme,
@@ -48,6 +54,14 @@ const CATEGORY_LABEL: Record<string, string> = {
   conventional: '✂️ MANUAL',
   neutral: '• NEUTRAL',
 };
+
+/** Renders a percentage, or the gap. Never prints "0%" for a missing number.
+ *  Uses the spaced human form so it reads the same as the ConfidenceIndicator
+ *  sitting beside it in this card. */
+const pct = formatAssessedPct;
+
+/** Bar width for a signal strength; a gap draws an empty bar. */
+const barWidth = (value: Assessable<number>) => (isAssessed(value) ? value : 0);
 
 export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProps> = ({
   assessment,
@@ -101,7 +115,13 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
         text: `TYPE: ${MANIPULATION_TYPE_SHORT[assessment.likelyType]}`,
         tone: theme.text,
       },
-      { at: 3, text: `CONFIDENCE: ${assessment.confidence}%`, tone: theme.text },
+      {
+        at: 3,
+        text: isAssessed(assessment.confidence)
+          ? `CONFIDENCE: ${assessment.confidence}%`
+          : 'CONFIDENCE: NOT ASSESSED',
+        tone: theme.text,
+      },
     ];
 
     return (
@@ -189,7 +209,7 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
             <span className="text-zinc-400 block text-[10px] font-bold uppercase">
               Confidence (based on available evidence)
             </span>
-            <span className={`font-bold ${theme.text}`}>{assessment.confidence}%</span>
+            <span className={`font-bold ${theme.text}`}>{pct(assessment.confidence)}</span>
           </div>
         </div>
 
@@ -204,12 +224,12 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
               <Bot className="w-3.5 h-3.5" />
               <span>AI-BASED SIGNAL</span>
             </span>
-            <span className="text-zinc-300 font-bold">{assessment.aiSignalStrength}%</span>
+            <span className="text-zinc-300 font-bold">{pct(assessment.aiSignalStrength)}</span>
           </div>
           <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div
               className="h-full rounded-full bg-rose-500 transition-all duration-700"
-              style={{ width: `${assessment.aiSignalStrength}%` }}
+              style={{ width: `${barWidth(assessment.aiSignalStrength)}%` }}
             />
           </div>
           <span className="text-[10px] text-zinc-400 block">
@@ -224,13 +244,13 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
               <span>CONVENTIONAL SIGNAL</span>
             </span>
             <span className="text-zinc-300 font-bold">
-              {assessment.conventionalSignalStrength}%
+              {pct(assessment.conventionalSignalStrength)}
             </span>
           </div>
           <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div
               className="h-full rounded-full bg-amber-500 transition-all duration-700"
-              style={{ width: `${assessment.conventionalSignalStrength}%` }}
+              style={{ width: `${barWidth(assessment.conventionalSignalStrength)}%` }}
             />
           </div>
           <span className="text-[10px] text-zinc-400 block">
@@ -244,7 +264,9 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">
           {assessment.indicators.length > 0
             ? 'Indicators detected'
-            : 'Indicators detected — none'}
+            : isAssessed(assessment.confidence)
+            ? 'Indicators detected — none'
+            : 'Indicators detected — not assessed'}
         </span>
 
         {visibleIndicators.length > 0 ? (
@@ -275,7 +297,9 @@ export const ManipulationAssessmentCard: React.FC<ManipulationAssessmentCardProp
           </ul>
         ) : (
           <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px] text-zinc-300">
-            Note: No significant indicators identified in the available evidence.
+            {isAssessed(assessment.confidence)
+              ? 'Note: No significant indicators identified in the available evidence.'
+              : 'Note: No analysis has run for this media, so no indicators have been looked for.'}
           </div>
         )}
 

@@ -11,9 +11,22 @@
  *
  * It deliberately does NOT claim to know who edited the media, what software
  * was used, or the complete editing history.
+ *
+ * It also never manufactures a reading out of a gap. Every numeric input is
+ * Assessable<number>: when analysis has not run, or ran and failed, the case
+ * state carries NOT_ASSESSED rather than a number. Those cases resolve to
+ * INCONCLUSIVE with no confidence figure attached to a measurement nobody
+ * made. `Number(NOT_ASSESSED)` would be NaN, and a NaN percentage rendered
+ * as a verdict is precisely the failure this codebase is built to avoid.
+ *
+ * Pure, because buildCaseState calls it and buildCaseState is documented as
+ * pure: the timestamp is taken from the intake rather than the clock.
  */
 
 import {
+  Assessable,
+  isAssessed,
+  NOT_ASSESSED,
   ManipulationAssessment,
   ManipulationIndicator,
   ManipulationIndicatorCategory,
@@ -29,6 +42,13 @@ export const MANIPULATION_SCOPE_NOTE =
 
 const clamp = (n: number, min: number, max: number) =>
   Math.max(min, Math.min(max, Math.round(n)));
+
+/**
+ * Formats an assessable percentage for display. A gap renders as
+ * "NOT ASSESSED", never as "NOT_ASSESSED%" or "0%".
+ */
+export const formatAssessedPct = (value: Assessable<number>): string =>
+  isAssessed(value) ? `${value}%` : 'NOT ASSESSED';
 
 /* -------------------------------------------------------------------------
    1. Mutation taxonomy
@@ -160,8 +180,23 @@ export function deriveManipulationAssessment(
   const sc = analysis?.sourceCompleteness;
 
   const mutations = manipulation?.mutationsDetected ?? [];
-  const syntheticScore = Number(manipulation?.syntheticProbabilityScore ?? 0);
-  const manipConfidence = Number(manipulation?.manipulationConfidence ?? 0);
+
+  /* The two numbers the whole classification rests on. Both are gaps until
+   * an analysis produces them, and a gap is not a zero. */
+  const rawSynthetic = manipulation?.syntheticProbabilityScore;
+  const rawManipConfidence = manipulation?.manipulationConfidence;
+  const hasSynthetic = rawSynthetic !== undefined && isAssessed(rawSynthetic);
+  const hasManipConfidence =
+    rawManipConfidence !== undefined && isAssessed(rawManipConfidence);
+
+  const syntheticScore = hasSynthetic ? Number(rawSynthetic) : 0;
+  const manipConfidence = hasManipConfidence ? Number(rawManipConfidence) : 0;
+
+  /* Without a manipulation confidence there is no analysis to reason over.
+   * Mutations alone cannot be weighed, so the honest answer is the gap. */
+  if (!hasManipConfidence) {
+    return buildUnassessedAssessment(caseState);
+  }
 
   const indicators: ManipulationIndicator[] = [];
 
@@ -177,7 +212,7 @@ export function deriveManipulationAssessment(
   });
 
   // --- Synthetic / generative signal --------------------------------------
-  if (syntheticScore >= 55) {
+  if (hasSynthetic && syntheticScore >= 55) {
     indicators.push({
       label: 'Synthetic visual artifacts',
       category: 'ai',
@@ -186,16 +221,18 @@ export function deriveManipulationAssessment(
     });
   }
 
-  if (visual?.chromaticAberration && /synthetic|distort/i.test(visual.chromaticAberration)) {
+  const chromatic = visual?.chromaticAberration;
+  if (chromatic !== undefined && isAssessed(chromatic) && /synthetic|distort/i.test(chromatic)) {
     indicators.push({
       label: 'Chromatic aberration inconsistency',
       category: 'ai',
-      detail: `Lens dispersion reported as ${visual.chromaticAberration} rather than natural optics.`,
+      detail: `Lens dispersion reported as ${chromatic} rather than natural optics.`,
       origin: 'Visual signal analysis',
     });
   }
 
-  if (visual?.lightingConsistency && /conflict|inconsist/i.test(visual.lightingConsistency)) {
+  const lighting = visual?.lightingConsistency;
+  if (lighting !== undefined && isAssessed(lighting) && /conflict|inconsist/i.test(lighting)) {
     indicators.push({
       label: 'Lighting vector conflict',
       category: 'neutral',
@@ -206,7 +243,9 @@ export function deriveManipulationAssessment(
   }
 
   // --- Structural / redistribution signal ---------------------------------
-  const generations = Number(structural?.compressionGenerations ?? 0);
+  const rawGenerations = structural?.compressionGenerations;
+  const generations =
+    rawGenerations !== undefined && isAssessed(rawGenerations) ? Number(rawGenerations) : 0;
   if (generations > 1) {
     indicators.push({
       label: 'Multiple re-encode generations',
@@ -216,7 +255,10 @@ export function deriveManipulationAssessment(
     });
   }
 
-  if (structural?.metadataTamperFlag) {
+  const rawTamperFlag = structural?.metadataTamperFlag;
+  const metadataTampered =
+    rawTamperFlag !== undefined && isAssessed(rawTamperFlag) && rawTamperFlag === true;
+  if (metadataTampered) {
     indicators.push({
       label: 'Metadata inconsistency',
       category: 'conventional',
@@ -254,16 +296,19 @@ export function deriveManipulationAssessment(
   const convRatio = classifiedMutations > 0 ? mutationConvCount / classifiedMutations : 0;
   const tamperBase = 0.6 * manipConfidence + 40;
 
-  const aiSignalStrength = clamp(Math.max(syntheticScore, aiRatio * tamperBase), 0, 100);
+  const aiSignalStrength = clamp(
+    Math.max(hasSynthetic ? syntheticScore : 0, aiRatio * tamperBase),
+    0,
+    100
+  );
 
   let conventionalRaw = convRatio * tamperBase;
-  const hasSupportingConventional =
-    extractedClip || generations > 1 || Boolean(structural?.metadataTamperFlag);
+  const hasSupportingConventional = extractedClip || generations > 1 || metadataTampered;
 
   if (mutationConvCount > 0) {
     // Supporting evidence reinforces an already-observed manual edit.
     if (extractedClip) conventionalRaw = Math.max(conventionalRaw, 60);
-    if (generations > 1 || structural?.metadataTamperFlag) {
+    if (generations > 1 || metadataTampered) {
       conventionalRaw = Math.max(conventionalRaw, 45);
     }
   } else if (hasSupportingConventional) {
@@ -275,7 +320,8 @@ export function deriveManipulationAssessment(
   const conventionalSignalStrength = clamp(conventionalRaw, 0, 100);
 
   const aiPresent =
-    syntheticScore >= 55 || (mutationAiCount > 0 && aiSignalStrength >= 25);
+    (hasSynthetic && syntheticScore >= 55) ||
+    (mutationAiCount > 0 && aiSignalStrength >= 25);
   const convPresent = mutationConvCount > 0 && conventionalSignalStrength >= 20;
 
   // --- Evidence sufficiency ------------------------------------------------
@@ -305,7 +351,9 @@ export function deriveManipulationAssessment(
   let confidence: number;
   switch (likelyType) {
     case 'AI_BASED':
-      confidence = 0.5 * manipConfidence + 0.5 * Math.max(syntheticScore, aiSignalStrength);
+      confidence =
+        0.5 * manipConfidence +
+        0.5 * Math.max(hasSynthetic ? syntheticScore : 0, aiSignalStrength);
       break;
     case 'CONVENTIONAL':
       confidence = 0.6 * manipConfidence + 0.4 * conventionalSignalStrength;
@@ -382,7 +430,13 @@ export function deriveManipulationAssessment(
       'Weak generative-AI signal present but below the reporting threshold; AI involvement can neither be confirmed nor excluded.'
     );
   }
-  if (caseState?.investigation?.originEcho?.is_estimated) {
+  if (!hasSynthetic) {
+    limitations.push(
+      'No synthetic-probability measurement is available for this media, so AI involvement is assessed from reported transformations alone.'
+    );
+  }
+  const originEcho = caseState?.investigation?.originEcho;
+  if (originEcho !== undefined && isAssessed(originEcho) && originEcho.is_estimated) {
     limitations.push(
       'Origin Echo attributes remain ESTIMATED — NOT ORIGINAL EVIDENCE. No original file has been recovered.'
     );
@@ -402,7 +456,49 @@ export function deriveManipulationAssessment(
     limitations,
     sourceCompletenessWarning,
     assessmentLabel: PROTOTYPE_ASSESSMENT_LABEL,
-    generatedAt: new Date().toISOString(),
+    generatedAt: caseState?.ingest?.uploadTimestamp ?? '',
+  };
+}
+
+/**
+ * The assessment for a case nothing has analysed.
+ *
+ * Not a verdict and not a zero score: the type is INCONCLUSIVE, no
+ * confidence figure is offered, and the limitations say why. A failed or
+ * unrun analysis must land here rather than on a fabricated percentage.
+ */
+function buildUnassessedAssessment(caseState: PersistentCaseState): ManipulationAssessment {
+  const sc = caseState?.analysis?.sourceCompleteness;
+  const extractedClip = Boolean(sc?.possibleExtractedClip) && !sc?.originalProvided;
+
+  const limitations = [
+    'No analysis has produced a manipulation measurement for this media, so no manipulation type can be assessed.',
+    'ANAMNESIS cannot determine who edited the media, what software was used, or the complete editing history.',
+  ];
+  if (extractedClip) {
+    limitations.push(
+      'Available media may be an extracted segment. Full source was not provided, therefore conclusions are limited to the submitted clip.'
+    );
+  }
+
+  return {
+    manipulationDetected: 'inconclusive',
+    likelyType: 'INCONCLUSIVE',
+    likelyTypeLabel: MANIPULATION_TYPE_LABEL.INCONCLUSIVE,
+    headline: 'Inconclusive — additional evidence required',
+    summary:
+      'No analysis result is available for this media. The hash and any metadata shown elsewhere were measured locally; a manipulation type assessment requires a completed analysis.',
+    confidence: NOT_ASSESSED,
+    aiSignalStrength: NOT_ASSESSED,
+    conventionalSignalStrength: NOT_ASSESSED,
+    indicators: [],
+    evidenceSufficient: false,
+    limitations,
+    sourceCompletenessWarning: extractedClip
+      ? 'Available media may be an extracted segment. Full source was not provided, therefore conclusions are limited to the submitted clip.'
+      : undefined,
+    assessmentLabel: PROTOTYPE_ASSESSMENT_LABEL,
+    generatedAt: caseState?.ingest?.uploadTimestamp ?? '',
   };
 }
 

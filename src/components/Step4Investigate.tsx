@@ -18,12 +18,15 @@ import {
   RotateCcw,
   Info,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { isAssessed, NOT_ASSESSED, PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
 import { ManipulationCarryForward } from './ManipulationAssessmentCard';
 import { getManipulationAssessment } from '../lib/manipulationAssessment';
 import { soundFx } from '../lib/soundFx';
+import { getStatusBadge } from '../lib/statusStyles';
+import { ForensicCopilotChat } from './ForensicCopilotChat';
+import { mimeTypeFromDataUrl } from '../lib/api';
 
 interface Step4InvestigateProps {
   caseState: PersistentCaseState;
@@ -38,7 +41,9 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
   const { forensicReplay, originEcho, contextCheck } = investigation;
   const manipulationAssessment = getManipulationAssessment(caseState);
 
-  const [activeSection, setActiveSection] = useState<'replay' | 'origin_echo' | 'context_check'>('replay');
+  const [activeSection, setActiveSection] = useState<
+    'replay' | 'origin_echo' | 'context_check' | 'cross_examine'
+  >('replay');
   const [activeStageIdx, setActiveStageIdx] = useState<number>(0);
   const [isPlayingReplay, setIsPlayingReplay] = useState<boolean>(false);
 
@@ -96,20 +101,13 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
     soundFx.playReplayTick();
   };
 
-  const activeStage = forensicReplay[activeStageIdx] || forensicReplay[0];
+  /* The replay timeline is legitimately empty on an un-analysed case, and
+   * indexing it crashed the step. Same defect as Step 3's lineage nodes. */
+  /** True when the model actually produced a context assessment. */
+  const hasContextFinding = isAssessed(contextCheck.summary);
 
-  const getStatusBadge = (status: string) => {
-    if (status.includes('Consistent') || status.includes('🟢') || status.includes('Untampered')) {
-      return 'bg-emerald-950/80 border-emerald-700 text-emerald-300';
-    }
-    if (status.includes('Inconsistent') || status.includes('🔴')) {
-      return 'bg-rose-950/80 border-rose-700 text-rose-300 animate-pulse';
-    }
-    if (status.includes('Needs') || status.includes('🟠')) {
-      return 'bg-amber-950/80 border-amber-700 text-amber-300';
-    }
-    return 'bg-blue-950/80 border-blue-700 text-blue-300';
-  };
+  const activeStage: (typeof forensicReplay)[number] | undefined =
+    forensicReplay[activeStageIdx] ?? forensicReplay[0];
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-[#0d0d14] p-5 sm:p-6 space-y-5 shadow-xl">
@@ -158,27 +156,50 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
           >
             C. CONTEXT CHECK
           </button>
+          <button
+            onClick={() => setActiveSection('cross_examine')}
+            className={`px-3 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              activeSection === 'cross_examine'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            D. CROSS-EXAMINE
+          </button>
         </div>
       </div>
 
-      {/* 3-SECOND KEY FINDING BANNER */}
-      <div className="p-4 rounded-xl bg-rose-950/30 border border-rose-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+      {/* KEY FINDING. Reads the context check for this case. It previously
+          asserted a 2018 Indonesian tsunami for every case regardless of
+          what had been ingested. */}
+      <div
+        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+          hasContextFinding ? 'bg-rose-950/30 border-rose-500/50' : 'bg-zinc-950/60 border-zinc-800'
+        }`}
+      >
         <div className="space-y-1">
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-rose-400 block">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400 block">
             KEY FINDING
           </span>
           <h3 className="text-base sm:text-lg font-black font-mono text-white">
-            Context Inconsistency Verified: Raw footage authentic, but claimed location &amp; date fabricated
+            {isAssessed(contextCheck.summary)
+              ? contextCheck.summary
+              : 'No context assessment available for this case'}
           </h3>
           <p className="text-xs text-zinc-300 font-sans">
-            Earliest archival capture traces to 2018 (Indonesia tsunami), decoupled from claimed 2026 viral caption.
+            {isAssessed(contextCheck.cascade.claimedLocation)
+              ? contextCheck.cascade.claimedLocation
+              : 'Claimed location and date have not been checked against the media.'}
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-2">
-          <ConfidenceIndicator score={91} />
-          <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-rose-950 border border-rose-600 text-rose-300 flex items-center gap-1.5">
+          <span
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 border ${getStatusBadge(
+              contextCheck.claimedLocationStatus
+            )}`}
+          >
             <XCircle className="w-3.5 h-3.5" />
-            <span>🔴 INCONSISTENT CLAIM</span>
+            <span>{contextCheck.claimedLocationStatus}</span>
           </span>
         </div>
       </div>
@@ -313,7 +334,7 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
                   1. Estimated Creation Window
                 </span>
                 <span className="font-bold text-white text-xs">
-                  {originEcho.earliest_known_timestamp || '2018-09-28T10:02:14Z (Archival Origin)'}
+                  {(isAssessed(originEcho) && originEcho.earliest_known_timestamp) || NOT_ASSESSED}
                 </span>
               </div>
 
@@ -344,9 +365,8 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
                 <span className="text-zinc-500 block text-[10px] uppercase font-bold">
                   3. Parent Media Candidate
                 </span>
-                <span className="font-bold text-purple-300 text-xs">
-                  Archival ID #ARC-2018-09-IDN (Palu Coastal Station)
-                </span>
+                {/* No archive lookup exists, so no parent is named. */}
+                <span className="font-bold text-zinc-500 text-xs">{NOT_ASSESSED}</span>
               </div>
 
               {/* 4. Confidence Level */}
@@ -361,16 +381,19 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
                   <span className="text-zinc-500 block text-[10px] uppercase font-bold">
                     4. Origin Confidence
                   </span>
-                  <span className="font-bold text-emerald-400 text-xs">Consensus Match</span>
+                  <span className="font-bold text-zinc-500 text-xs">
+                    {NOT_ASSESSED}
+                  </span>
                 </div>
-                <ConfidenceIndicator score={89} />
+                {/* Nothing scores the origin reconstruction, so nothing claims to. */}
+                <ConfidenceIndicator score={NOT_ASSESSED} />
               </div>
             </div>
 
             <div className="p-3 rounded-lg bg-[#0d0d14] border border-zinc-800 space-y-1.5">
               <span className="text-zinc-500 block text-[10px] font-bold">RECONSTRUCTED SCENE PARAMETERS:</span>
               <p className="text-zinc-300 font-sans text-xs">
-                {originEcho.unmanipulated_scene_description}
+                {(isAssessed(originEcho) && originEcho.unmanipulated_scene_description) || NOT_ASSESSED}
               </p>
             </div>
           </div>
@@ -432,7 +455,31 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
 
           {/* Why this matters */}
           <WhyThisMatters
-            explanation="Context decoupling reveals that legitimate disaster footage from 2018 was repurposed with fabricated 2026 conflict claims."
+            explanation="Decoupling asks a separate question from authenticity: media can be entirely genuine and still be presented with a false date, place or caption. That is why the claimed context is checked against the media rather than assumed from it."
+          />
+        </div>
+      )}
+
+      {/* SECTION D: CROSS-EXAMINATION */}
+      {activeSection === 'cross_examine' && (
+        <div className="space-y-2">
+          <p className="text-[11px] text-zinc-400 font-sans">
+            Each question is one request, sent only when you ask. Answers are
+            assisted findings and require human verification.
+          </p>
+          {/* Demo Mode fixtures carry an SVG placeholder rather than real
+              evidence. Sending it guarantees a rejection and tells the model
+              nothing, so a reference case is cross-examined on its stored
+              report alone — which keeps Demo Mode working with no network
+              dependency on the media itself. */}
+          <ForensicCopilotChat
+            caseState={caseState}
+            imageBase64={ingest.isPrecomputed ? undefined : ingest.previewUrl || undefined}
+            mimeType={
+              ingest.isPrecomputed || !ingest.previewUrl
+                ? undefined
+                : mimeTypeFromDataUrl(ingest.previewUrl)
+            }
           />
         </div>
       )}

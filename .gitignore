@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Local npm lockfile. bun.lock is the committed source of truth (see Dockerfile).
+package-lock.json

@@ -1,3 +1,26 @@
+/* =========================================================================
+ * THE GAP SENTINEL
+ *
+ * NOT_ASSESSED is a first-class value, not an empty string and not a zero.
+ * It means: the model omitted this field, or analysis has not run.
+ *
+ * Every panel that can display a finding must also be able to render this
+ * state — grey, unemphasised, no verdict colour, no percentage, and never
+ * a green tick. It exists so that deleting an invented constant has
+ * somewhere honest to put the gap it leaves behind.
+ * ========================================================================= */
+
+export const NOT_ASSESSED = 'NOT_ASSESSED' as const;
+export type NotAssessed = typeof NOT_ASSESSED;
+
+/** A value the file or the model supplied, or the explicit absence of one. */
+export type Assessable<T> = T | NotAssessed;
+
+/** Narrowing helper: true when a real measurement or model answer is present. */
+export function isAssessed<T>(value: Assessable<T>): value is T {
+  return value !== NOT_ASSESSED;
+}
+
 export interface CaseSummary {
   evidence_id: string;
   primary_hash_sha256: string;
@@ -49,6 +72,28 @@ export interface FiveQuestions {
   how_it_spread: HowItSpreadAnalysis;
 }
 
+/* -------------------------------------------------------------------------
+ * View-side projections of the five questions.
+ *
+ * The wire interfaces above are exactly what the Gemini responseSchema
+ * produces and must not be altered. These aliases widen only the fields
+ * that carry a verdict or a number, so that a case which has not been
+ * analysed can render the gap instead of a fabricated zero.
+ * ---------------------------------------------------------------------- */
+
+export type AssessedWho = Omit<WhoAnalysis, 'confidence'> & {
+  confidence: Assessable<number>;
+};
+export type AssessedWhere = Omit<WhereAnalysis, 'status'> & {
+  status: Assessable<WhereAnalysis['status']>;
+};
+export type AssessedWhen = Omit<WhenAnalysis, 'status'> & {
+  status: Assessable<WhenAnalysis['status']>;
+};
+export type AssessedHowItSpread = Omit<HowItSpreadAnalysis, 'estimated_generations'> & {
+  estimated_generations: Assessable<number>;
+};
+
 export interface ForensicTimelineStage {
   stage: number;
   label: string;
@@ -97,6 +142,37 @@ export interface AnamnesisForensicReport {
   manipulation_assessment?: ManipulationAssessment;
 }
 
+/**
+ * The dossier shape handed to the export modal.
+ *
+ * Mirrors AnamnesisForensicReport but is built from the view model, so it
+ * carries gaps rather than zero-filling them. Optional blocks are omitted
+ * entirely when nothing in them was assessed.
+ */
+export interface ExportableDossier {
+  case_summary: {
+    evidence_id: string;
+    primary_hash_sha256: Assessable<string>;
+    verdict_summary: Assessable<string>;
+  };
+  the_five_questions: {
+    who: AssessedWho;
+    where: AssessedWhere;
+    when: AssessedWhen;
+    what_changed: WhatChangedAnalysis;
+    how_it_spread: AssessedHowItSpread;
+  };
+  forensic_replay_timeline: ForensicTimelineStage[];
+  context_integrity_check: ContextIntegrityCheck;
+  investigator_notes: Assessable<string>;
+  technical_metrics?: Partial<TechnicalForensicMetrics>;
+  origin_echo?: OriginEchoEstimate;
+  /* Always present. Unlike the blocks above it carries its own inconclusive
+   * state, so omitting it would lose the distinction between "assessed as
+   * inconclusive" and "never considered". */
+  manipulation_assessment?: ManipulationAssessment;
+}
+
 export interface MediaIntakeData {
   evidenceId: string;
   title: string;
@@ -114,6 +190,12 @@ export interface MediaIntakeData {
   sourceUrl?: string;
   exifData?: Record<string, string | number | boolean>;
   uploadTimestamp: string;
+  /**
+   * True when this intake came from a Demo Mode fixture rather than a file
+   * the investigator supplied. The UI must badge it for the whole life of
+   * the case, so a reference case is never mistaken for a live result.
+   */
+  isPrecomputed?: boolean;
 }
 
 export interface ForensicFilterMode {
@@ -127,7 +209,11 @@ export type StandardEvidenceStatus =
   | '🟢 OBSERVED / CONSISTENT'
   | '🟠 NEEDS VERIFICATION'
   | '🔴 INCONSISTENT'
-  | '🔵 ESTIMATED';
+  | '🔵 ESTIMATED'
+  | '⚪ NOT ASSESSED';
+
+/** The neutral status. Carries no verdict; must never render in a verdict colour. */
+export const STATUS_NOT_ASSESSED: StandardEvidenceStatus = '⚪ NOT ASSESSED';
 
 export interface SourceCompletenessData {
   submittedDuration: string;
@@ -181,9 +267,12 @@ export interface ManipulationAssessment {
   likelyTypeLabel: string;
   headline: string;
   summary: string;
-  confidence: number; // 0-100
-  aiSignalStrength: number; // 0-100
-  conventionalSignalStrength: number; // 0-100
+  /* Assessable: a case nobody analysed carries NOT_ASSESSED here rather
+   * than 0. "We did not measure this" and "we measured this and it was
+   * zero" are different claims and must not render alike. */
+  confidence: Assessable<number>; // 0-100
+  aiSignalStrength: Assessable<number>; // 0-100
+  conventionalSignalStrength: Assessable<number>; // 0-100
   indicators: ManipulationIndicator[];
   evidenceSufficient: boolean;
   limitations: string[];
@@ -197,50 +286,61 @@ export interface PersistentCaseState {
   ingest: MediaIntakeData;
   analysis: {
     visual: {
-      frameCharacteristics: string;
+      frameCharacteristics: Assessable<string>;
       visualIndicators: string[];
-      chromaticAberration: string;
-      lightingConsistency: string;
-      confidence: number;
+      chromaticAberration: Assessable<string>;
+      lightingConsistency: Assessable<string>;
+      shadowSunAngleMatch: Assessable<string>;
+      confidence: Assessable<number>;
     };
     audio: {
-      audioCharacteristics: string;
+      audioCharacteristics: Assessable<string>;
       audioIndicators: string[];
-      enfStatus: string;
-      confidence: number;
+      enfStatus: Assessable<string>;
+      acousticEnvelope: Assessable<string>;
+      ambientReverbConsistency: Assessable<string>;
+      confidence: Assessable<number>;
     };
     structural: {
-      streamCharacteristics: string;
-      compressionGenerations: number;
-      metadataTamperFlag: boolean;
-      confidence: number;
+      streamCharacteristics: Assessable<string>;
+      compressionGenerations: Assessable<number>;
+      metadataTamperFlag: Assessable<boolean>;
+      confidence: Assessable<number>;
     };
     manipulation: {
       mutationsDetected: string[];
-      syntheticProbabilityScore: number;
-      manipulationConfidence: number;
+      syntheticProbabilityScore: Assessable<number>;
+      manipulationConfidence: Assessable<number>;
       status: StandardEvidenceStatus;
     };
     sourceCompleteness?: SourceCompletenessData;
     manipulationAssessment?: ManipulationAssessment;
   };
   relationships: {
-    totalRelatedFound: number;
+    totalRelatedFound: Assessable<number>;
     nodes: Array<{
       id: string;
       title: string;
       relationshipType: string;
-      confidence: number;
+      confidence: Assessable<number>;
       platform: string;
-      resolution: string;
+      resolution: Assessable<string>;
       observedTransformations: string[];
       badgeColor: string;
+      /* Per-copy lineage detail. The forensic schema returns no per-node
+       * label, description, mutation type, generation depth or timestamp,
+       * so these are NOT_ASSESSED until a source of them exists. */
+      label: Assessable<string>;
+      description: Assessable<string>;
+      mutationType: Assessable<string>;
+      generation: Assessable<number>;
+      timestamp: Assessable<string>;
     }>;
     lineageHierarchy: Array<{ label: string; sub: string; type: string }>;
   };
   investigation: {
     forensicReplay: ForensicTimelineStage[];
-    originEcho: OriginEchoEstimate;
+    originEcho: Assessable<OriginEchoEstimate>;
     contextCheck: {
       rawMediaStatus: StandardEvidenceStatus;
       claimedLocationStatus: StandardEvidenceStatus;
@@ -257,17 +357,20 @@ export interface PersistentCaseState {
   };
   report: {
     digitalCrimeScene: {
-      who: WhoAnalysis;
-      where: WhereAnalysis;
-      when: WhenAnalysis;
+      who: AssessedWho;
+      where: AssessedWhere;
+      when: AssessedWhen;
       what: WhatChangedAnalysis;
-      how: HowItSpreadAnalysis;
-      source: { earliestKnownSource: string; platform: string };
+      how: AssessedHowItSpread;
+      source: {
+        earliestKnownSource: Assessable<string>;
+        platform: Assessable<string>;
+      };
     };
     forensicPackage: {
       evidenceId: string;
-      sha256: string;
-      findings: string;
+      sha256: Assessable<string>;
+      findings: Assessable<string>;
       confidenceScores: Record<string, number>;
       processingHistory: string[];
       generatedAt: string;
@@ -304,6 +407,8 @@ export interface SavedCase {
 }
 
 export interface BenchmarkCase {
+  /** Always true. Demo Mode fixtures are never live results. */
+  isPrecomputed: true;
   id: string;
   title: string;
   category: 'False Narrative / Recycled' | 'Deepfake / Synthetic AI' | 'Pixel Tampered / Spliced' | 'Audio-Visual Desync';
