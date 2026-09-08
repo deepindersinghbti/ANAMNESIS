@@ -29,7 +29,7 @@ export const Logo: React.FC<LogoProps> = ({
 
   return (
     <div className={`relative inline-flex items-center justify-center shrink-0 ${className}`}>
-      {/* SVG Vector recreation of the circular ANAMESIS logo with exact gradients */}
+      {/* SVG Vector recreation of the circular ANAMNESIS logo with exact gradients */}
       <svg
         viewBox="0 0 200 200"
         className={`${sizeMap[size]} drop-shadow-[0_0_15px_rgba(236,72,153,0.35)]`}
@@ -101,7 +101,7 @@ export const Logo: React.FC<LogoProps> = ({
         <circle cx="32" cy="106" r="3" fill="#3b82f6" />
         <circle cx="168" cy="106" r="3" fill="#f97316" />
 
-        {/* Arched Text: ANAMESIS */}
+        {/* Arched Text: ANAMNESIS */}
         <text
           fill="url(#anamnesisRingGrad)"
           fontSize="18.5"
@@ -114,7 +114,7 @@ export const Logo: React.FC<LogoProps> = ({
             startOffset="50%"
             textAnchor="middle"
           >
-            ANAMESIS
+            ANAMNESIS
           </textPath>
         </text>
 
@@ -163,7 +163,7 @@ export const Logo: React.FC<LogoProps> = ({
       {showText && (
         <div className="ml-3">
           <span className="text-xl font-black tracking-wider bg-gradient-to-r from-[#3b82f6] via-[#ec4899] to-[#f97316] bg-clip-text text-transparent font-mono">
-            ANAMESIS
+            ANAMNESIS
           </span>
           <p className="text-[10px] uppercase font-mono tracking-widest text-zinc-400">
             A Digital Crime-Scene Intelligence

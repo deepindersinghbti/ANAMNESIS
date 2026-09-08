@@ -1,0 +1,44 @@
+# =============================================================================
+# Cloud Build → Artifact Registry → Cloud Run
+#
+# Exists for one reason: API_SHARED_SECRET has to be a Docker build argument,
+# because vite compiles it into the client bundle. `gcloud run deploy --source`
+# cannot pass build args, so the build is described here instead.
+#
+#   gcloud builds submit \
+#     --config cloudbuild.yaml \
+#     --substitutions=_API_SHARED_SECRET="your-secret",_REGION="asia-southeast1"
+#
+# Two tags are pushed: ':latest' so the deploy command is predictable, and
+# ':$BUILD_ID' so a specific build can be rolled back to. $BUILD_ID is always
+# populated; $SHORT_SHA is only set by build triggers, not by `builds submit`
+# from a local directory, where it would resolve to an empty tag.
+#
+# Rotating the secret means rebuilding, not just editing a Cloud Run variable.
+# =============================================================================
+
+substitutions:
+  _REGION: asia-southeast1
+  _SERVICE: anamnesis-media-forensics-engine
+  _REPO: anamnesis
+  _API_SHARED_SECRET: ''
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID'
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - '--build-arg'
+      - 'API_SHARED_SECRET=${_API_SHARED_SECRET}'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:latest'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$BUILD_ID'
+      - '.'
+
+options:
+  logging: CLOUD_LOGGING_ONLY

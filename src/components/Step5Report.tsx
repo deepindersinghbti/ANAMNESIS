@@ -8,7 +8,7 @@ import {
   AlertTriangle,
   Sparkles,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { NOT_ASSESSED, PersistentCaseState } from '../types';
 import { soundFx } from '../lib/soundFx';
 
 interface Step5ReportProps {
@@ -44,34 +44,32 @@ export const Step5Report: React.FC<Step5ReportProps> = ({
   const whereClaimed =
     caseState?.ingest?.claimedLocation ||
     caseState?.report?.digitalCrimeScene?.where?.claimed ||
-    'Jakarta Coast, Indonesia';
+    NOT_ASSESSED;
   const whereObserved =
-    caseState?.report?.digitalCrimeScene?.where?.observed ||
-    'Central Sulawesi Coast (2018 Event)';
+    caseState?.report?.digitalCrimeScene?.where?.observed || NOT_ASSESSED;
   const whereInfo = `Claimed: ${whereClaimed} | Observed: ${whereObserved}`;
 
   const whenClaimed =
     caseState?.ingest?.claimedDateTime ||
     caseState?.report?.digitalCrimeScene?.when?.claimed ||
-    '2026-08-14 09:30 UTC';
+    NOT_ASSESSED;
   const whenObserved =
-    caseState?.report?.digitalCrimeScene?.when?.observed ||
-    '2018-09-28 14:30 UTC';
+    caseState?.report?.digitalCrimeScene?.when?.observed || NOT_ASSESSED;
   const whenInfo = `Claimed: ${whenClaimed} | Observed: ${whenObserved}`;
 
   const whatInfo =
     caseState?.report?.digitalCrimeScene?.what?.details ||
     caseState?.investigation?.contextCheck?.summary ||
-    'Physical wave footage authentic, but recycled with fabricated viral caption and location.';
+    NOT_ASSESSED;
 
   const howInfo =
     caseState?.report?.digitalCrimeScene?.how?.lineage_notes ||
-    caseState?.report?.digitalCrimeScene?.how?.propagationPath ||
-    'Disseminated via root video repository ➔ Telegram news ➔ WhatsApp forwards ➔ Viral X post.';
+    NOT_ASSESSED;
 
-  const sourceStatus = caseState?.analysis?.sourceCompleteness?.originalProvided
-    ? 'Original master source confirmed (01:00.0)'
-    : 'Possible extracted clip (12.4s) — Full source not available';
+  /* Only the case's own completeness assessment may speak here. Absent
+   * one, the dossier records that the question was not answered. */
+  const sourceStatus =
+    caseState?.analysis?.sourceCompleteness?.sourceVerificationStatus ?? NOT_ASSESSED;
 
   const handleGeneratePackage = () => {
     setIsGenerating(true);

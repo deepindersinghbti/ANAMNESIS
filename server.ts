@@ -2,13 +2,303 @@ import express from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 
 dotenv.config();
 
+/* G11: the model ID appears as a literal in exactly one place in this
+ * codebase - the default below - and is overridable from the environment.
+ * It is logged at startup and echoed by /api/health, so "is the model
+ * right?" is answerable with one curl rather than by watching a demo fail. */
+const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-3.7-flash';
+
+/* The Gemini adapter's timeout, per the target architecture. Without it the
+ * upstream call had no deadline at all: the browser gave up at 30 seconds
+ * while the server went on holding the connection — measured at 142 seconds
+ * against a congested model before it finally returned 503.
+ *
+ * Keep this in step with REQUEST_TIMEOUT_MS in src/lib/api.ts. If the server
+ * budget is the larger of the two, the browser aborts first and the server
+ * keeps working on a result nobody will read.
+ *
+ * The specification called for 30s, written before anyone had timed a real
+ * photograph. Measured against one: 17.8s on a good attempt, and three
+ * consecutive failures at exactly 32.1s immediately before it. The variance
+ * is model-side rather than payload-side — a 0.12 MB request timed out just
+ * as readily as a 1.73 MB one — so the budget has to cover the slow case
+ * rather than the median. 60s does; 30s demonstrably does not. */
+/* The API rejects deadlines under ten seconds outright — "Manually set
+ * deadline 2s is too short. Minimum allowed deadline is 10s." — so a value
+ * below the floor would turn every analysis into an INVALID_ARGUMENT rather
+ * than the snappier failure the author intended. Clamp and say so. */
+const GEMINI_MIN_TIMEOUT_MS = 10_000;
+const requestedTimeout = Number(process.env.GEMINI_TIMEOUT_MS) || 60_000;
+const GEMINI_TIMEOUT_MS = Math.max(requestedTimeout, GEMINI_MIN_TIMEOUT_MS);
+
+/* ===========================================================================
+ * G14 — SHARED-SECRET GATE
+ *
+ * Both POST routes are the only paths to a metered external API, and the
+ * deployed URL is public. Without this, anyone who finds the host can spend
+ * the key's quota; exhaustion before judging is a realistic outcome.
+ *
+ * Be clear about what this is. The browser has to send the secret, so the
+ * secret is in the bundle, and anyone willing to open devtools can read it.
+ * It stops drive-by and automated traffic, not a motivated person. Real
+ * departmental identity is the production answer and is out of scope; the
+ * rate limiter below is what bounds the damage either way.
+ * ======================================================================== */
+
+const API_SHARED_SECRET = process.env.API_SHARED_SECRET?.trim() || '';
+/* Development is either NODE_ENV, or the --dev flag that `npm run dev`
+ * passes. The flag exists because the script is named "dev" and ought to
+ * mean it: relying on NODE_ENV alone meant running the dev script with an
+ * older .env silently produced production behaviour, which fails closed on
+ * every analysis with a 503 and serves a stale dist/ instead of live
+ * source. Setting it inline is not portable across cmd, PowerShell and sh,
+ * so the flag carries it instead of a cross-env dependency. */
+const IS_DEVELOPMENT =
+  process.env.NODE_ENV === 'development' || process.argv.includes('--dev');
+const IS_PRODUCTION = !IS_DEVELOPMENT;
+
+function requireSharedSecret(
+  req: express.Request,
+  res: express.Response,
+  next: express.NextFunction
+) {
+  if (!API_SHARED_SECRET) {
+    /* Unset. In development that is a convenience; in production it means
+     * the proxy is open, so it fails closed rather than silently serving. */
+    if (IS_PRODUCTION) {
+      res.status(503).json({
+        error: 'The forensics engine is not configured for requests. Set API_SHARED_SECRET.',
+      });
+      return;
+    }
+    next();
+    return;
+  }
+
+  const presented = req.get('x-anamnesis-key') ?? '';
+  if (presented !== API_SHARED_SECRET) {
+    res.status(401).json({ error: 'This request was not authorised by the forensics engine.' });
+    return;
+  }
+  next();
+}
+
+/* ===========================================================================
+ * G15 — RATE LIMITING BY IP
+ *
+ * A fixed window held in memory. That is the right size for a single-process
+ * prototype and deliberately not a dependency: it needs no store, no client
+ * and nothing to fail at boot. It does not survive a restart and does not
+ * coordinate across instances — both acceptable when there is one process,
+ * and both worth knowing before this is ever scaled.
+ * ======================================================================== */
+
+const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000;
+const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX) || 12;
+
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const key = req.ip ?? req.socket.remoteAddress ?? 'unknown';
+  const now = Date.now();
+  const bucket = rateBuckets.get(key);
+
+  if (!bucket || now >= bucket.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    next();
+    return;
+  }
+
+  if (bucket.count >= RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil((bucket.resetAt - now) / 1000);
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: `Too many analysis requests from this address. Try again in ${retryAfter}s.`,
+    });
+    return;
+  }
+
+  bucket.count += 1;
+  next();
+}
+
+/* Keep the map from growing without bound on a long-running process. */
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(key);
+  }
+}, RATE_LIMIT_WINDOW_MS).unref();
+
+/**
+ * An abort signal for one upstream call.
+ *
+ * Fires on whichever comes first: the timeout above, or the investigator
+ * navigating away / the browser's own 30s abort. The second case is the one
+ * that matters in practice — a disconnected client used to leave the model
+ * call running to completion.
+ *
+ * Note the SDK's own caveat: aborting is a client-side operation. It frees
+ * this process immediately but does not cancel work already accepted
+ * upstream, and does not avoid being billed for it.
+ */
+function requestAbort(
+  res: express.Response
+): { signal: AbortSignal; timedOut: () => boolean; dispose: () => void } {
+  const controller = new AbortController();
+  let timedOut = false;
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, GEMINI_TIMEOUT_MS);
+
+  /* Listen on the response, not the request. For a POST the request stream
+   * is consumed and destroyed as soon as the body is read, so req 'close'
+   * fires on every normal request and would abort all of them. The response
+   * closes early only when the client has genuinely gone away. */
+  const onClientGone = () => {
+    if (!res.writableEnded) controller.abort();
+  };
+  res.on('close', onClientGone);
+
+  return {
+    signal: controller.signal,
+    timedOut: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer);
+      res.off('close', onClientGone);
+    },
+  };
+}
+
+/* ===========================================================================
+ * UPSTREAM ERROR MAPPING
+ *
+ * Two rules govern everything below, and they pull in the same direction:
+ *
+ *   G16  No model output and no SDK error text ever reaches the client. The
+ *        raw payload goes to the server log, which is where a developer can
+ *        read it and an investigator cannot.
+ *   Honesty  The status we return means what it says. Collapsing a busy
+ *        model into a flat 500 tells the investigator the engine is broken
+ *        when the truth is "try again in a minute" — and on a demonstration
+ *        day that distinction is the whole difference between a recoverable
+ *        stumble and an abandoned demo.
+ * ======================================================================== */
+
+interface UpstreamFailure {
+  /** Status to return to the client. */
+  status: number;
+  /** Safe to display. Contains no model output and no credential. */
+  message: string;
+}
+
+/** Pull the upstream HTTP code out of whatever shape the SDK threw. */
+function extractUpstreamCode(error: any): number | null {
+  if (typeof error?.status === 'number') return error.status;
+  if (typeof error?.code === 'number') return error.code;
+  // The SDK commonly stringifies the upstream JSON envelope into .message.
+  if (typeof error?.message === 'string') {
+    try {
+      const parsed = JSON.parse(error.message);
+      const code = parsed?.error?.code;
+      if (typeof code === 'number') return code;
+    } catch {
+      const match = error.message.match(/\b(4\d{2}|5\d{2})\b/);
+      if (match) return Number(match[1]);
+    }
+  }
+  return null;
+}
+
+function mapUpstreamFailure(error: any, timedOut = false): UpstreamFailure {
+  /* Google reports an expired deadline as DEADLINE_EXCEEDED / "Deadline
+   * expired before operation could complete." — words that match none of
+   * the obvious patterns, so a real timeout was being mapped to the generic
+   * "the model failed, retrying often succeeds". That advice is wrong: a
+   * request that consistently exceeds the budget will keep exceeding it. */
+  const aborted =
+    timedOut ||
+    error?.name === 'AbortError' ||
+    extractUpstreamCode(error) === 504 ||
+    (typeof error?.message === 'string' &&
+      /abort|timeout|timed out|deadline/i.test(error.message));
+
+  if (aborted) {
+    return {
+      status: 504,
+      message:
+        `The model did not respond within ${Math.round(GEMINI_TIMEOUT_MS / 1000)} seconds and the request was cancelled. ` +
+        'Retry, or raise GEMINI_TIMEOUT_MS if this happens consistently.',
+    };
+  }
+
+  if (error instanceof Error && error.message.includes('GEMINI_API_KEY is not configured')) {
+    return {
+      status: 503,
+      message: 'The forensics engine has no API key configured. Analysis is unavailable.',
+    };
+  }
+
+  switch (extractUpstreamCode(error)) {
+    case 429:
+      /* A 429 is far more often a per-minute rate limit than an exhausted
+       * allowance, and on a paid key "quota exhausted" reads as a billing
+       * problem the investigator cannot fix. Say what is true of both
+       * cases: too many requests, wait, try again. */
+      return {
+        status: 429,
+        message:
+          'The model provider is limiting requests for this key. Wait a few seconds and retry, or use Demo Mode.',
+      };
+    case 503:
+      return {
+        status: 503,
+        message:
+          `The model (${GEMINI_MODEL}) is busy and refused the request. This is usually temporary — retry, ` +
+          'or set GEMINI_MODEL to another available model and restart.',
+      };
+    case 500:
+    case 502:
+    case 504:
+      return {
+        status: 502,
+        message: 'The model failed to complete the analysis. Retrying often succeeds.',
+      };
+    case 400:
+      return {
+        status: 400,
+        message:
+          'The model rejected this evidence. Check that the file is a real image and that its type was sent correctly.',
+      };
+    case 404:
+      return {
+        status: 502,
+        message:
+          `The configured model (${GEMINI_MODEL}) was not found. Check GEMINI_MODEL against /api/health.`,
+      };
+    case 401:
+    case 403:
+      return {
+        status: 502,
+        message: 'The forensics engine could not authenticate with the model provider.',
+      };
+    default:
+      return {
+        status: 502,
+        message: 'The analysis could not be completed.',
+      };
+  }
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  /* G12: platforms inject PORT. A hardcoded 3000 worked only by luck. */
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
@@ -31,11 +321,21 @@ async function startServer() {
 
   // Health check
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', engine: 'ANAMNESIS v3.4 Forensics Engine', timestamp: new Date().toISOString() });
+    res.json({
+      status: 'ok',
+      engine: 'ANAMNESIS v3.4 Forensics Engine',
+      model: GEMINI_MODEL,
+      timeoutMs: GEMINI_TIMEOUT_MS,
+      // Whether a secret is required, never the secret itself.
+      authRequired: Boolean(API_SHARED_SECRET),
+      rateLimit: { max: RATE_LIMIT_MAX, windowMs: RATE_LIMIT_WINDOW_MS },
+      timestamp: new Date().toISOString(),
+    });
   });
 
   // Forensic Analysis endpoint
-  app.post('/api/forensics/analyze', async (req, res) => {
+  app.post('/api/forensics/analyze', rateLimit, requireSharedSecret, async (req, res) => {
+    const abort = requestAbort(res);
     try {
       const {
         imageBase64,
@@ -101,9 +401,11 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: GEMINI_MODEL,
         contents,
         config: {
+          abortSignal: abort.signal,
+          httpOptions: { timeout: GEMINI_TIMEOUT_MS },
           systemInstruction: `You are ANAMNESIS, the uncompromising digital crime-scene media forensics engine for OSINT, law enforcement, and investigative journalism. Your mission is to reconstruct forensic truth, decouple media from deceptive narratives, and provide deterministic evidence chains. Always respond with strict, valid JSON matching the requested ANAMNESIS forensic format.`,
           responseMimeType: 'application/json',
           responseSchema: {
@@ -112,7 +414,16 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
               case_summary: {
                 type: Type.OBJECT,
                 properties: {
-                  evidence_id: { type: Type.STRING, description: 'e.g. ANAM-2026-8941' },
+                  /* Describe the shape, never a sample value: given a literal
+                   * example the model returns it verbatim, so every case came
+                   * back with the same identifier. The adapter now takes the
+                   * case number from the intake regardless, but leaving a
+                   * sample here would keep steering the model to copy it. */
+                  evidence_id: {
+                    type: Type.STRING,
+                    description:
+                      'Case identifier for this evidence item. Derive it from the supplied file name or hash; do not reuse an identifier from these instructions.',
+                  },
                   primary_hash_sha256: { type: Type.STRING },
                   verdict_summary: { type: Type.STRING, description: '1-2 sentence executive forensic verdict' },
                 },
@@ -238,8 +549,13 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
       try {
         parsedData = JSON.parse(rawText);
       } catch (err) {
-        console.error('Failed to parse Gemini JSON output:', rawText);
-        return res.status(500).json({ error: 'Forensics parsing error', raw: rawText });
+        // G16: raw output is logged, never returned. Echoing it back put
+        // unvalidated model text on the investigator's screen.
+        console.error('Failed to parse Gemini JSON output. Raw text follows:');
+        console.error(rawText);
+        return res.status(502).json({
+          error: 'The model returned a malformed report. Retry the analysis.',
+        });
       }
 
       // Ensure evidence ID and hash are preserved if provided
@@ -249,15 +565,19 @@ Return valid JSON adhering exactly to the requested ANAMNESIS schema.
 
       res.json(parsedData);
     } catch (error: any) {
+      // Full detail to the log; only the mapped, safe message to the client.
       console.error('Error during forensic analysis:', error);
-      res.status(500).json({
-        error: error.message || 'Internal server error in forensic engine',
-      });
+      if (res.headersSent || res.writableEnded) return;
+      const failure = mapUpstreamFailure(error, abort.timedOut());
+      res.status(failure.status).json({ error: failure.message });
+    } finally {
+      abort.dispose();
     }
   });
 
   // Forensic Cross-Examination Chat endpoint
-  app.post('/api/forensics/chat', async (req, res) => {
+  app.post('/api/forensics/chat', rateLimit, requireSharedSecret, async (req, res) => {
+    const abort = requestAbort(res);
     try {
       const { message, reportContext, imageBase64, mimeType } = req.body;
       const ai = getGeminiClient();
@@ -270,6 +590,9 @@ Current Case Report Context:
 ${JSON.stringify(reportContext, null, 2)}
 
 Provide forensic, rigorous, and technically precise answers. Reference Error Level Analysis (ELA), shadow vectors, sun elevation geometry, sensor PRNU noise, JPEG quantization tables, reverse OSINT methods, metadata provenance, and evidentiary chain of custody. Decouple raw visual media from deceptive narrative claims.
+
+RESPONSE FORMAT
+Write for an investigator reading a chat panel, not a paper. Use short paragraphs and, where a list genuinely helps, simple bullets. You may use **bold** for emphasis and short ### headings. Do not use LaTeX, mathematical notation or formulae - express relationships in words. Do not use tables. Keep the answer under roughly 250 words unless the investigator asks for more.
 `;
 
       const contents: any[] = [];
@@ -288,9 +611,11 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: GEMINI_MODEL,
         contents,
         config: {
+          abortSignal: abort.signal,
+          httpOptions: { timeout: GEMINI_TIMEOUT_MS },
           systemInstruction: systemPrompt,
         },
       });
@@ -298,12 +623,25 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
       res.json({ reply: response.text });
     } catch (error: any) {
       console.error('Error in forensic chat:', error);
-      res.status(500).json({ error: error.message || 'Failed to process inquiry.' });
+      if (res.headersSent || res.writableEnded) return;
+      const failure = mapUpstreamFailure(error, abort.timedOut());
+      res.status(failure.status).json({ error: failure.message });
+    } finally {
+      abort.dispose();
     }
   });
 
   // Vite middleware in dev / Static files in production
-  if (process.env.NODE_ENV !== 'production') {
+  /* G13: the check was `!== 'production'`, so an unset NODE_ENV booted a
+   * Vite dev server in production. Inverting it makes the safe path the one
+   * that happens by accident. */
+  if (IS_DEVELOPMENT) {
+    /* Imported lazily and only on the development branch. A top-level import
+     * compiles to `require("vite")` at module scope, which meant the
+     * production server could not boot unless the whole Vite toolchain was
+     * installed beside it — so the runtime image had to ship a build tool,
+     * and pruning devDependencies broke startup with a module-not-found. */
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -319,6 +657,25 @@ Provide forensic, rigorous, and technically precise answers. Reference Error Lev
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`ANAMNESIS Server running on http://0.0.0.0:${PORT}`);
+    console.log(`ANAMNESIS model:   ${GEMINI_MODEL}`);
+    console.log(`ANAMNESIS timeout: ${GEMINI_TIMEOUT_MS}ms per model call`);
+    if (requestedTimeout < GEMINI_MIN_TIMEOUT_MS) {
+      console.warn(
+        `ANAMNESIS warning: GEMINI_TIMEOUT_MS=${requestedTimeout} is below the API minimum of ${GEMINI_MIN_TIMEOUT_MS}ms and was raised to ${GEMINI_TIMEOUT_MS}ms.`
+      );
+    }
+    console.log(`ANAMNESIS API key: ${process.env.GEMINI_API_KEY ? 'configured' : 'MISSING - analysis will fail'}`);
+    console.log(
+      `ANAMNESIS auth:    ${
+        API_SHARED_SECRET
+          ? 'shared secret required on POST routes'
+          : IS_PRODUCTION
+          ? 'MISSING - POST routes will refuse every request'
+          : 'not set (development only; POST routes are open)'
+      }`
+    );
+    console.log(`ANAMNESIS limit:   ${RATE_LIMIT_MAX} requests / ${RATE_LIMIT_WINDOW_MS}ms per IP`);
+    console.log(`ANAMNESIS mode:    ${IS_PRODUCTION ? 'production (static dist/)' : 'development (vite middleware)'}`);
   });
 }
 

@@ -11,7 +11,7 @@ import {
   ArrowDown,
   Sparkles,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { isAssessed, PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
 import { soundFx } from '../lib/soundFx';
@@ -26,7 +26,11 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
   onComplete,
 }) => {
   const { ingest, relationships } = caseState;
-  const targetCount = relationships.totalRelatedFound || 14;
+  /* No invented default. When the lineage count was never assessed the
+   * counter stays at zero and the reveal animation does not run. */
+  const targetCount = isAssessed(relationships.totalRelatedFound)
+    ? relationships.totalRelatedFound
+    : 0;
 
   // Requirement 2: Related media discovery animation (0 -> 3 -> 7 -> 11 -> 14)
   const [animatedCount, setAnimatedCount] = useState<number>(0);
@@ -38,7 +42,18 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
 
   useEffect(() => {
     // Count animation steps
-    const countSteps = [0, 3, 7, 11, targetCount];
+    const countSteps =
+      targetCount > 0
+        ? Array.from(
+            new Set([
+              0,
+              Math.round(targetCount * 0.25),
+              Math.round(targetCount * 0.5),
+              Math.round(targetCount * 0.75),
+              targetCount,
+            ])
+          )
+        : [0];
     const timers: NodeJS.Timeout[] = [];
 
     countSteps.forEach((countVal, idx) => {
@@ -73,7 +88,12 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
     };
   }, [targetCount, relationships.nodes.length]);
 
-  const selectedNode = relationships.nodes[selectedNodeIndex] || relationships.nodes[0];
+  /* Draining the invented lineage left this array legitimately empty, and
+   * indexing it crashed the whole step. A case with no related copies is
+   * the normal state now — the schema returns no per-copy data — so it has
+   * to render as an honest gap rather than a white screen. */
+  const selectedNode: (typeof relationships.nodes)[number] | undefined =
+    relationships.nodes[selectedNodeIndex] ?? relationships.nodes[0];
 
   const getNodeIcon = (type: string) => {
     switch (type) {
@@ -120,24 +140,45 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
         </div>
       </div>
 
-      {/* 3-SECOND KEY FINDING BANNER */}
-      <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+      {/* KEY FINDING. There is no reverse-image search in this system, so
+          when no related copies were identified it says exactly that. */}
+      <div
+        className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md ${
+          targetCount > 0 ? 'bg-emerald-950/30 border-emerald-500/50' : 'bg-zinc-950/60 border-zinc-800'
+        }`}
+      >
         <div className="space-y-1">
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-400 block">
+          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-zinc-400 block">
             KEY FINDING
           </span>
           <h3 className="text-base sm:text-lg font-black font-mono text-white">
-            {animatedCount} related media instances discovered across 4 generations
+            {targetCount > 0
+              ? `${animatedCount} related media instances identified`
+              : 'No related copies identified'}
           </h3>
           <p className="text-xs text-zinc-300 font-sans">
-            Lineage tree reconstructs root origin to current viral screen recording ({ingest.fileName}).
+            {targetCount > 0
+              ? `Lineage reconstructed for ${ingest.fileName}.`
+              : `Identifying other copies of ${ingest.fileName} requires a reverse-image or perceptual-hash search, which this build does not perform.`}
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-2">
-          <ConfidenceIndicator score={94} />
-          <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-emerald-950 border border-emerald-600 text-emerald-300 flex items-center gap-1.5">
+          <ConfidenceIndicator score={relationships.totalRelatedFound} />
+          <span
+            className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold flex items-center gap-1.5 border ${
+              targetCount > 0
+                ? 'bg-emerald-950 border-emerald-600 text-emerald-300'
+                : 'bg-zinc-900 border-dashed border-zinc-700 text-zinc-500'
+            }`}
+          >
             <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>🟢 {isGraphFullyVisible ? 'MEDIA FAMILY IDENTIFIED' : 'DISCOVERING LINEAGE...'}</span>
+            <span>
+              {targetCount === 0
+                ? 'NOT ASSESSED'
+                : isGraphFullyVisible
+                ? 'MEDIA FAMILY IDENTIFIED'
+                : 'DISCOVERING LINEAGE...'}
+            </span>
           </span>
         </div>
       </div>
@@ -153,7 +194,11 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
                 <span>Lineage Sequence (Root to Current)</span>
               </span>
               <span className="text-[10px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-purple-300 font-bold">
-                {isGraphFullyVisible ? 'MEDIA FAMILY IDENTIFIED' : `Revealing Node ${revealedNodeCount} of 5`}
+                {relationships.nodes.length === 0
+                  ? 'NO LINEAGE DATA'
+                  : isGraphFullyVisible
+                  ? 'MEDIA FAMILY IDENTIFIED'
+                  : `Revealing node ${revealedNodeCount} of ${relationships.nodes.length}`}
               </span>
             </div>
 
@@ -218,38 +263,51 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
         {/* Right: Selected Node Inspection Card */}
         <div className="lg:col-span-6 space-y-3">
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4 space-y-3 font-mono text-xs">
-            <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
-              <span className="text-[11px] font-bold text-purple-300 uppercase">
-                NODE METRICS: {selectedNode.label}
-              </span>
-              <ConfidenceIndicator score={selectedNode.confidence} />
-            </div>
+            {selectedNode ? (
+              <>
+                <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                  <span className="text-[11px] font-bold text-purple-300 uppercase">
+                    NODE METRICS: {selectedNode.label}
+                  </span>
+                  <ConfidenceIndicator score={selectedNode.confidence} />
+                </div>
 
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
-                <span className="text-zinc-500 block text-[10px]">Mutation Type:</span>
-                <span className="font-bold text-zinc-200">{selectedNode.mutationType}</span>
-              </div>
-              <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
-                <span className="text-zinc-500 block text-[10px]">Platform Ingest:</span>
-                <span className="font-bold text-zinc-200">{selectedNode.platform}</span>
-              </div>
-              <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
-                <span className="text-zinc-500 block text-[10px]">Generation Depth:</span>
-                <span className="font-bold text-zinc-200">Gen {selectedNode.generation} of 4</span>
-              </div>
-              <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
-                <span className="text-zinc-500 block text-[10px]">Earliest Timestamp:</span>
-                <span className="font-bold text-purple-300">{selectedNode.timestamp}</span>
-              </div>
-            </div>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">Mutation Type:</span>
+                    <span className="font-bold text-zinc-200">{selectedNode.mutationType}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">Platform Ingest:</span>
+                    <span className="font-bold text-zinc-200">{selectedNode.platform}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">Generation Depth:</span>
+                    <span className="font-bold text-zinc-200">{selectedNode.generation}</span>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800">
+                    <span className="text-zinc-500 block text-[10px]">Earliest Timestamp:</span>
+                    <span className="font-bold text-purple-300">{selectedNode.timestamp}</span>
+                  </div>
+                </div>
 
-            <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800 text-[11px]">
-              <span className="text-zinc-500 block text-[10px] font-bold mb-1">Observed Transformation:</span>
-              <span className="text-zinc-300 font-sans">
-                {selectedNode.description || 'Spatial crop and chroma compression applied during reposting.'}
-              </span>
-            </div>
+                <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800 text-[11px]">
+                  <span className="text-zinc-500 block text-[10px] font-bold mb-1">Observed Transformation:</span>
+                  <span className="text-zinc-300 font-sans">{selectedNode.description}</span>
+                </div>
+              </>
+            ) : (
+              <div className="py-6 text-center space-y-1.5">
+                <p className="text-[11px] font-mono font-bold text-zinc-400">
+                  NOT_ASSESSED — no related copies identified
+                </p>
+                <p className="text-[11px] text-zinc-500 font-sans max-w-sm mx-auto">
+                  Identifying other copies of this media requires a reverse-image
+                  or perceptual-hash search across platforms. Anamnesis does not
+                  perform one, so it claims no lineage.
+                </p>
+              </div>
+            )}
 
             {/* Why This Matters Section */}
             <WhyThisMatters

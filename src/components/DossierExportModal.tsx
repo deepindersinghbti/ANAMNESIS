@@ -9,14 +9,48 @@ import {
 } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import { Logo } from './Logo';
-import { AnamnesisForensicReport, MediaIntakeData } from '../types';
+import { ExportableDossier, isAssessed, MediaIntakeData, NOT_ASSESSED } from '../types';
 
 interface DossierExportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  report: AnamnesisForensicReport;
+  report: ExportableDossier;
   intake: MediaIntakeData;
 }
+
+
+/* ===========================================================================
+ * G25 — jsPDF CANNOT RENDER EMOJI
+ *
+ * The built-in Helvetica/Times fonts are WinAnsi-encoded. Status values now
+ * carry a leading glyph (e.g. "OBSERVED / CONSISTENT" prefixed with a green
+ * circle, "NOT ASSESSED" with a white one), and any of those written through
+ * doc.text() comes out as mojibake in the exported dossier — the one artefact
+ * an investigator is most likely to hand to somebody else.
+ *
+ * Stripping is safe precisely because the glyph is decorative: the words
+ * beside it already carry the meaning, so the status still reads correctly.
+ * Model prose goes through the same filter, since nothing stops a model
+ * returning an emoji of its own.
+ * ======================================================================== */
+const pdfSafe = (value: unknown): string =>
+  String(value ?? '')
+    // Arrows carry meaning in the cascade lines, so they become ASCII
+    // rather than disappearing and running two clauses together.
+    .replace(/[→➔➡➜⟶➙]/g, '->')
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/…/g, '...')
+    // Emoji, symbols, dingbats, variation selectors, ZWJ.
+    .replace(
+      /[\u{1F000}-\u{1FAFF}\u{2190}-\u{2BFF}\u{FE00}-\u{FE0F}\u{200D}\u{2600}-\u{27BF}]/gu,
+      ''
+    )
+    // Anything else the core fonts cannot encode.
+    .replace(/[^\x00-\xFF]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 
 export const DossierExportModal: React.FC<DossierExportModalProps> = ({
   isOpen,
@@ -32,7 +66,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(report, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `ANAMESIS_REPORT_${report.case_summary.evidence_id}.json`);
+    downloadAnchor.setAttribute('download', `ANAMNESIS_REPORT_${report.case_summary.evidence_id}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
@@ -50,12 +84,12 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
       doc.setFont('courier', 'bold');
       doc.setFontSize(18);
       doc.setTextColor(236, 72, 153); // Pink / Magenta
-      doc.text('ANAMESIS FORENSIC CASE DOSSIER', 14, 18);
+      doc.text('ANAMNESIS FORENSIC CASE DOSSIER', 14, 18);
 
       doc.setFontSize(10);
       doc.setTextColor(203, 213, 225);
-      doc.text(`A Digital Crime-Scene Intelligence | EVIDENCE ID: ${report.case_summary.evidence_id}`, 14, 26);
-      doc.text(`DIGITAL HASH (SHA-256): ${report.case_summary.primary_hash_sha256.slice(0, 48)}...`, 14, 34);
+      doc.text(pdfSafe(`A Digital Crime-Scene Intelligence | EVIDENCE ID: ${report.case_summary.evidence_id}`), 14, 26);
+      doc.text(pdfSafe(`DIGITAL HASH (SHA-256): ${report.case_summary.primary_hash_sha256.slice(0, 48)}...`), 14, 34);
 
       // Verdict Summary
       doc.setTextColor(15, 23, 42);
@@ -65,7 +99,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      const splitVerdict = doc.splitTextToSize(report.case_summary.verdict_summary, pageWidth - 28);
+      const splitVerdict = doc.splitTextToSize(pdfSafe(report.case_summary.verdict_summary), pageWidth - 28);
       doc.text(splitVerdict, 14, 60);
 
       let yPos = 60 + splitVerdict.length * 6 + 10;
@@ -77,7 +111,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
       yPos += 8;
 
       const questions = [
-        { label: '1. WHO (Entities & Artifacts)', text: `${report.the_five_questions.who.observation} (Confidence: ${Math.round(report.the_five_questions.who.confidence * 100)}%)` },
+        { label: '1. WHO (Entities & Artifacts)', text: `${report.the_five_questions.who.observation} (Confidence: ${isAssessed(report.the_five_questions.who.confidence) ? Math.round(report.the_five_questions.who.confidence * 100) + '%' : NOT_ASSESSED})` },
         { label: '2. WHERE (Geolocation)', text: `Claimed: ${report.the_five_questions.where.claimed} | Observed: ${report.the_five_questions.where.observed} [Status: ${report.the_five_questions.where.status}]` },
         { label: '3. WHEN (Temporal Markers)', text: `Claimed: ${report.the_five_questions.when.claimed} | Observed: ${report.the_five_questions.when.observed} [Status: ${report.the_five_questions.when.status}]` },
         { label: '4. WHAT CHANGED (Mutations)', text: `${report.the_five_questions.what_changed.details} (Mutations: ${report.the_five_questions.what_changed.mutations_detected.join(', ')})` },
@@ -91,12 +125,12 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
         }
         doc.setFont('courier', 'bold');
         doc.setFontSize(10);
-        doc.text(q.label, 14, yPos);
+        doc.text(pdfSafe(q.label), 14, yPos);
         yPos += 5;
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(9);
-        const splitQ = doc.splitTextToSize(q.text, pageWidth - 28);
+        const splitQ = doc.splitTextToSize(pdfSafe(q.text), pageWidth - 28);
         doc.text(splitQ, 14, yPos);
         yPos += splitQ.length * 5 + 4;
       });
@@ -114,13 +148,13 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('courier', 'normal');
       doc.setFontSize(9);
-      doc.text(`- Raw Media Status: ${report.context_integrity_check.raw_media_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Raw Media Status: ${report.context_integrity_check.raw_media_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Claimed Location Status: ${report.context_integrity_check.claimed_location_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Claimed Location Status: ${report.context_integrity_check.claimed_location_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Claimed Timestamp Status: ${report.context_integrity_check.claimed_time_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Claimed Timestamp Status: ${report.context_integrity_check.claimed_time_status}`), 14, yPos);
       yPos += 5;
-      doc.text(`- Audio Stream Integrity: ${report.context_integrity_check.audio_integrity_status}`, 14, yPos);
+      doc.text(pdfSafe(`- Audio Stream Integrity: ${report.context_integrity_check.audio_integrity_status}`), 14, yPos);
       yPos += 10;
 
       // Investigator Notes
@@ -135,7 +169,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(9);
-      const splitNotes = doc.splitTextToSize(report.investigator_notes, pageWidth - 28);
+      const splitNotes = doc.splitTextToSize(pdfSafe(report.investigator_notes), pageWidth - 28);
       doc.text(splitNotes, 14, yPos);
       yPos += splitNotes.length * 5 + 15;
 
@@ -150,11 +184,11 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
 
       doc.setFont('courier', 'bold');
       doc.setFontSize(8);
-      doc.text(`CRYPTOGRAPHIC SEAL: SHA256-ANAMESIS-VERIFIED // CHAIN OF CUSTODY CERTIFIED`, 14, yPos);
+      doc.text(`CRYPTOGRAPHIC SEAL: SHA256-ANAMNESIS-VERIFIED // CHAIN OF CUSTODY CERTIFIED`, 14, yPos);
       yPos += 4;
-      doc.text(`EXAMINED VIA ANAMESIS MULTIMODAL FORENSICS ENGINE v2.4`, 14, yPos);
+      doc.text(`EXAMINED VIA ANAMNESIS MULTIMODAL FORENSICS ENGINE v2.4`, 14, yPos);
 
-      doc.save(`ANAMESIS_DOSSIER_${report.case_summary.evidence_id}.pdf`);
+      doc.save(`ANAMNESIS_DOSSIER_${report.case_summary.evidence_id}.pdf`);
     } catch (err) {
       console.error('PDF generation error:', err);
     }
@@ -170,7 +204,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-mono font-black logo-gradient-text uppercase">
-                  ANAMESIS FORENSIC CASE DOSSIER
+                  ANAMNESIS FORENSIC CASE DOSSIER
                 </h2>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-[#ec4899]/20 border border-[#ec4899]/40 text-pink-300 font-mono font-bold">
                   {report.case_summary.evidence_id}
@@ -259,7 +293,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
             <div className="space-y-2">
               <div className="p-3 rounded-xl bg-[#06060c] border border-blue-900/40 space-y-1">
                 <span className="text-blue-400 font-bold block">WHO:</span>
-                <p className="font-sans">{report.the_five_questions.who.observation} (Confidence: {Math.round(report.the_five_questions.who.confidence * 100)}%)</p>
+                <p className="font-sans">{report.the_five_questions.who.observation} (Confidence: {isAssessed(report.the_five_questions.who.confidence) ? `${Math.round(report.the_five_questions.who.confidence * 100)}%` : NOT_ASSESSED})</p>
               </div>
               <div className="p-3 rounded-xl bg-[#06060c] border border-amber-900/40 space-y-1">
                 <span className="text-amber-400 font-bold block">WHERE:</span>
@@ -294,7 +328,7 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
           <div className="p-4 rounded-2xl border border-dashed border-zinc-800 bg-[#06060c] flex flex-wrap items-center justify-between gap-4 text-[11px] text-zinc-400">
             <div className="flex items-center gap-2">
               <Award className="w-5 h-5 text-[#ec4899]" />
-              <span>DIGITALLY SIGNED &amp; SEALED BY ANAMESIS ENGINE</span>
+              <span>DIGITALLY SIGNED &amp; SEALED BY ANAMNESIS ENGINE</span>
             </div>
             <span>STAMP: {report.case_summary.primary_hash_sha256.slice(0, 16)}...</span>
           </div>

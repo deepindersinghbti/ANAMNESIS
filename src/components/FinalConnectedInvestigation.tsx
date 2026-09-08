@@ -22,7 +22,7 @@ import {
   MessageSquare,
   ShieldCheck,
 } from 'lucide-react';
-import { PersistentCaseState } from '../types';
+import { isAssessed, NOT_ASSESSED, PersistentCaseState } from '../types';
 
 interface FinalConnectedInvestigationProps {
   caseState: PersistentCaseState;
@@ -81,7 +81,7 @@ export const FinalConnectedInvestigation: React.FC<FinalConnectedInvestigationPr
       } else if (lower.includes('when') || lower.includes('date') || lower.includes('time')) {
         responseText = `[TEMPORAL CORROBORATION]: Claimed incident time is "${ingest?.claimedDateTime || 'Not available'}". However, technical watermark metadata and archive matching trace the primary visual stream back to "${report?.digitalCrimeScene?.when?.observed || 'Not available'}". Status: ${report?.digitalCrimeScene?.when?.status || 'Not available'}.`;
       } else if (lower.includes('origin') || lower.includes('source') || lower.includes('echo')) {
-        responseText = `[ORIGIN ECHO ANALYSIS]: Earliest probable origin is "${report?.digitalCrimeScene?.source?.earliestKnownSource || 'Not available'}" on ${report?.digitalCrimeScene?.source?.platform || 'Not available'}. Surviving invariant attributes include: ${(investigation?.originEcho?.surviving_attributes || []).join('; ') || 'None'}. Note: This is an ESTIMATED reconstruction.`;
+        responseText = `[ORIGIN ECHO ANALYSIS]: Earliest probable origin is "${report?.digitalCrimeScene?.source?.earliestKnownSource || 'Not available'}" on ${report?.digitalCrimeScene?.source?.platform || 'Not available'}. Surviving invariant attributes include: ${(investigation && isAssessed(investigation.originEcho) ? investigation.originEcho.surviving_attributes : []).join('; ') || NOT_ASSESSED}. Note: This is an ESTIMATED reconstruction.`;
       } else if (lower.includes('manipulat') || lower.includes('fake') || lower.includes('tamper')) {
         responseText = `[MUTATION FINDINGS]: Detected alterations: ${(analysis?.manipulation?.mutationsDetected || []).join(', ') || 'None'}. Manipulation confidence is ${analysis?.manipulation?.manipulationConfidence ?? 0}%, with synthetic AI score of ${analysis?.manipulation?.syntheticProbabilityScore ?? 0}%. Status: ${analysis?.manipulation?.status || 'Complete'}.`;
       } else {
@@ -346,7 +346,7 @@ export const FinalConnectedInvestigation: React.FC<FinalConnectedInvestigationPr
                     <span className="text-[10px] text-amber-400 font-bold">ESTIMATED</span>
                   </div>
                   <p className="text-xs text-zinc-300 font-sans">
-                    {investigation?.originEcho?.unmanipulatedSceneDescription || investigation?.originEcho?.unmanipulated_scene_description || 'Reconstructed original scene without viral overlay.'}
+                    {(investigation && isAssessed(investigation.originEcho) && investigation.originEcho.unmanipulated_scene_description) || NOT_ASSESSED}
                   </p>
                 </div>
 
