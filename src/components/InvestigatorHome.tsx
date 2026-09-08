@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { InvestigatorProfile, SavedCase } from '../types';
 import { soundFx } from '../lib/soundFx';
+import { getCaseProgressBadge } from '../lib/statusStyles';
 
 interface InvestigatorHomeProps {
   investigator: InvestigatorProfile;
@@ -34,13 +35,6 @@ export const InvestigatorHome: React.FC<InvestigatorHomeProps> = ({
     soundFx.playStartInvestigation();
     onNewInvestigation();
   };
-  const getStatusBadge = (status: string) => {
-    if (status.includes('Completed') || status.includes('Ready')) {
-      return 'bg-emerald-950/80 border-emerald-700 text-emerald-300';
-    }
-    return 'bg-purple-950/80 border-purple-700 text-purple-300';
-  };
-
   const getStepName = (stepNum: number) => {
     switch (stepNum) {
       case 1:
@@ -169,7 +163,7 @@ export const InvestigatorHome: React.FC<InvestigatorHomeProps> = ({
                         CASE <strong className="text-purple-300">#{sc.id}</strong>
                       </span>
                       <span
-                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${getStatusBadge(
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${getCaseProgressBadge(
                           sc.status
                         )}`}
                       >
