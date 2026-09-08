@@ -1,6 +1,6 @@
 /* Prototype authentication/storage only. Production deployment requires secure departmental identity, encryption, access control and audit logging. */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -41,7 +41,15 @@ type AppView = 'welcome' | 'login' | 'home' | 'profile' | 'investigation';
 
 export default function App() {
   // Application-Level Navigation View
-  const [appView, setAppView] = useState<AppView>('welcome');
+  // Initialize from URL hash if present (e.g. #home, #login)
+  const getInitialView = (): AppView => {
+    const hash = window.location.hash.replace('#', '') as AppView;
+    const validViews: AppView[] = ['welcome', 'login', 'home', 'profile', 'investigation'];
+    // Only restore non-auth views from hash; auth-gated views need investigator state
+    if (hash === 'welcome' || hash === 'login') return hash;
+    return 'welcome';
+  };
+  const [appView, setAppView] = useState<AppView>(getInitialView);
 
   // Authenticated Investigator State
   const [investigator, setInvestigator] = useState<InvestigatorProfile | null>(null);
@@ -88,6 +96,74 @@ export default function App() {
       setStepFeedbackToast((current) => (current === msg ? null : current));
     }, 2200);
   };
+
+  // =========================================================================
+  // BROWSER HISTORY NAVIGATION
+  // Syncs appView state with browser history for Back/Forward button support.
+  // =========================================================================
+  const isPopStateNavigation = useRef(false);
+
+  // Navigate to a new view, pushing a browser history entry
+  const navigate = useCallback((view: AppView, extraState?: Record<string, unknown>) => {
+    setAppView(view);
+    const state = { view, ...extraState };
+    window.history.pushState(state, '', `#${view}`);
+  }, []);
+
+  // Navigate back using browser history (used for "Back" buttons)
+  const navigateBack = useCallback(() => {
+    window.history.back();
+  }, []);
+
+  // Replace current history entry (used for logout to prevent forward-nav)
+  const navigateReplace = useCallback((view: AppView) => {
+    setAppView(view);
+    window.history.replaceState({ view }, '', `#${view}`);
+  }, []);
+
+  // Listen for browser Back/Forward button
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      isPopStateNavigation.current = true;
+      const state = event.state as { view?: AppView; activeCaseId?: string } | null;
+      if (state?.view) {
+        // For auth-gated views, check if investigator is still logged in
+        const authGatedViews: AppView[] = ['home', 'profile', 'investigation'];
+        if (authGatedViews.includes(state.view) && !investigator) {
+          // Can't restore auth-gated view without login, go to welcome
+          setAppView('welcome');
+          window.history.replaceState({ view: 'welcome' }, '', '#welcome');
+        } else {
+          setAppView(state.view);
+        }
+      } else {
+        // Fallback: parse from hash
+        const hash = window.location.hash.replace('#', '') as AppView;
+        const validViews: AppView[] = ['welcome', 'login', 'home', 'profile', 'investigation'];
+        if (validViews.includes(hash)) {
+          const authGatedViews: AppView[] = ['home', 'profile', 'investigation'];
+          if (authGatedViews.includes(hash) && !investigator) {
+            setAppView('welcome');
+            window.history.replaceState({ view: 'welcome' }, '', '#welcome');
+          } else {
+            setAppView(hash);
+          }
+        } else {
+          setAppView('welcome');
+        }
+      }
+      isPopStateNavigation.current = false;
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [investigator]);
+
+  // Set initial history entry on mount
+  useEffect(() => {
+    window.history.replaceState({ view: appView }, '', `#${appView}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync state changes to current investigator's saved cases
   const syncActiveCase = (
@@ -143,7 +219,7 @@ export default function App() {
   // --- NAVIGATION & AUTH ACTIONS ---
 
   const handleStartFromWelcome = () => {
-    setAppView('login');
+    navigate('login');
   };
 
   const handleLogin = (email: string, name?: string) => {
@@ -166,19 +242,20 @@ export default function App() {
     setInvestigator(profile);
     const initialCases = loadSavedCasesFromStorage(profile.id);
     setSavedCases(initialCases);
-    setAppView('home');
+    navigate('home');
   };
 
   const handleContinueDemo = () => {
     setInvestigator(DEMO_INVESTIGATOR);
     const initialCases = loadSavedCasesFromStorage(DEMO_INVESTIGATOR.id);
     setSavedCases(initialCases);
-    setAppView('home');
+    navigate('home');
   };
 
   const handleLogout = () => {
     setInvestigator(null);
-    setAppView('welcome');
+    // Use replaceState to prevent forward-navigating back to auth pages
+    navigateReplace('welcome');
   };
 
   // --- CASE WORKSPACE ACTIONS ---
@@ -189,7 +266,7 @@ export default function App() {
     setWorkflowStage(savedCase.workflowStage);
     setCompletedSteps(savedCase.completedSteps);
     setExpandedCompletedSteps(savedCase.expandedCompletedSteps || {});
-    setAppView('investigation');
+    navigate('investigation', { activeCaseId: savedCase.id });
   };
 
   const handleNewInvestigation = () => {
@@ -310,7 +387,7 @@ export default function App() {
     setWorkflowStage(1);
     setCompletedSteps([]);
     setExpandedCompletedSteps({});
-    setAppView('investigation');
+    navigate('investigation', { activeCaseId: newId });
   };
 
   // --- STEP COMPLETE HANDLERS ---
@@ -484,9 +561,9 @@ export default function App() {
         <Navbar
           caseId={appView === 'investigation' ? activeCaseId : undefined}
           hasStartedCase={appView === 'investigation'}
-          onGoToCases={() => setAppView('home')}
+          onGoToCases={() => navigate('home')}
           onNewCase={handleNewInvestigation}
-          onGoToProfile={() => setAppView('profile')}
+          onGoToProfile={() => navigate('profile')}
           onLogout={handleLogout}
         />
       )}
@@ -513,7 +590,7 @@ export default function App() {
             cases={savedCases}
             onOpenCase={handleOpenCase}
             onNewInvestigation={handleNewInvestigation}
-            onViewProfile={() => setAppView('profile')}
+            onViewProfile={() => navigate('profile')}
           />
         )}
 
@@ -522,7 +599,7 @@ export default function App() {
           <InvestigatorProfileView
             investigator={investigator}
             cases={savedCases}
-            onBackToCases={() => setAppView('home')}
+            onBackToCases={() => navigateBack()}
             onNewInvestigation={handleNewInvestigation}
             onOpenCase={handleOpenCase}
           />
@@ -544,7 +621,7 @@ export default function App() {
                   {workflowStage >= 6 ? 'Dossier Sealed' : `Step ${Math.min(5, Math.floor(workflowStage))} in progress`}
                 </span>
                 <button
-                  onClick={() => setAppView('home')}
+                  onClick={() => navigateBack()}
                   className="text-purple-400 hover:text-purple-300 font-bold underline cursor-pointer"
                 >
                   ← Back to My Cases
