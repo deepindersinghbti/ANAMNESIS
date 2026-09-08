@@ -139,6 +139,7 @@ export interface AnamnesisForensicReport {
   investigator_notes: string;
   technical_metrics?: TechnicalForensicMetrics;
   origin_echo?: OriginEchoEstimate;
+  manipulation_assessment?: ManipulationAssessment;
 }
 
 /**
@@ -166,6 +167,10 @@ export interface ExportableDossier {
   investigator_notes: Assessable<string>;
   technical_metrics?: Partial<TechnicalForensicMetrics>;
   origin_echo?: OriginEchoEstimate;
+  /* Always present. Unlike the blocks above it carries its own inconclusive
+   * state, so omitting it would lose the distinction between "assessed as
+   * inconclusive" and "never considered". */
+  manipulation_assessment?: ManipulationAssessment;
 }
 
 export interface MediaIntakeData {
@@ -231,6 +236,52 @@ export interface SourceCompletenessData {
   };
 }
 
+/* =========================================================================
+   MANIPULATION TYPE ASSESSMENT
+   Distinguishes AI-based manipulation from conventional / manual editing.
+   This is a prototype, AI-assisted assessment layer derived from the
+   signals already produced by the ANAMNESIS analysis pipeline. It is NOT a
+   validated forensic classifier and must be verified by an investigator.
+   ========================================================================= */
+
+export type ManipulationTypeClass =
+  | 'AI_BASED'
+  | 'CONVENTIONAL'
+  | 'MIXED'
+  | 'NONE'
+  | 'INCONCLUSIVE';
+
+export type ManipulationIndicatorCategory = 'ai' | 'conventional' | 'neutral';
+
+export interface ManipulationIndicator {
+  label: string;
+  category: ManipulationIndicatorCategory;
+  detail: string;
+  origin: string; // which analysis signal produced this indicator
+}
+
+export interface ManipulationAssessment {
+  /** true / false / 'inconclusive' — never an absolute legal conclusion. */
+  manipulationDetected: boolean | 'inconclusive';
+  likelyType: ManipulationTypeClass;
+  likelyTypeLabel: string;
+  headline: string;
+  summary: string;
+  /* Assessable: a case nobody analysed carries NOT_ASSESSED here rather
+   * than 0. "We did not measure this" and "we measured this and it was
+   * zero" are different claims and must not render alike. */
+  confidence: Assessable<number>; // 0-100
+  aiSignalStrength: Assessable<number>; // 0-100
+  conventionalSignalStrength: Assessable<number>; // 0-100
+  indicators: ManipulationIndicator[];
+  evidenceSufficient: boolean;
+  limitations: string[];
+  sourceCompletenessWarning?: string;
+  /** Honest capability label shown alongside every result. */
+  assessmentLabel: string;
+  generatedAt: string;
+}
+
 export interface PersistentCaseState {
   ingest: MediaIntakeData;
   analysis: {
@@ -263,6 +314,7 @@ export interface PersistentCaseState {
       status: StandardEvidenceStatus;
     };
     sourceCompleteness?: SourceCompletenessData;
+    manipulationAssessment?: ManipulationAssessment;
   };
   relationships: {
     totalRelatedFound: Assessable<number>;

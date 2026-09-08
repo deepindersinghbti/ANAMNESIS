@@ -23,6 +23,8 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { isAssessed, NOT_ASSESSED, PersistentCaseState } from '../types';
+import { ManipulationAssessmentCard } from './ManipulationAssessmentCard';
+import { getManipulationAssessment } from '../lib/manipulationAssessment';
 
 interface FinalConnectedInvestigationProps {
   caseState: PersistentCaseState;
@@ -235,6 +237,9 @@ export const FinalConnectedInvestigation: React.FC<FinalConnectedInvestigationPr
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-cyan-400 border border-zinc-800">
                 {analysis.manipulation.manipulationConfidence}% TAMPER SCORE
               </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-900 text-amber-400 border border-zinc-800 hidden sm:inline">
+                {getManipulationAssessment(caseState).likelyTypeLabel}
+              </span>
               {expandedSteps[2] ? <ChevronUp className="w-4 h-4 text-zinc-400" /> : <ChevronDown className="w-4 h-4 text-zinc-400" />}
             </div>
           </div>
@@ -260,6 +265,12 @@ export const FinalConnectedInvestigation: React.FC<FinalConnectedInvestigationPr
                   </ul>
                 </div>
               </div>
+
+              {/* Manipulation Assessment carried through the whole case */}
+              <ManipulationAssessmentCard
+                assessment={getManipulationAssessment(caseState)}
+                compact
+              />
             </div>
           )}
         </div>
