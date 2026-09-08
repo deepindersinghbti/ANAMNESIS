@@ -9,6 +9,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { NOT_ASSESSED, PersistentCaseState } from '../types';
+import { ManipulationAssessmentCard } from './ManipulationAssessmentCard';
+import { formatAssessedPct, getManipulationAssessment } from '../lib/manipulationAssessment';
 import { soundFx } from '../lib/soundFx';
 
 interface Step5ReportProps {
@@ -70,6 +72,8 @@ export const Step5Report: React.FC<Step5ReportProps> = ({
    * one, the dossier records that the question was not answered. */
   const sourceStatus =
     caseState?.analysis?.sourceCompleteness?.sourceVerificationStatus ?? NOT_ASSESSED;
+
+  const assessment = caseState ? getManipulationAssessment(caseState) : undefined;
 
   const handleGeneratePackage = () => {
     setIsGenerating(true);
@@ -156,8 +160,22 @@ export const Step5Report: React.FC<Step5ReportProps> = ({
             <span className="text-emerald-400 block text-[10px] font-bold">SOURCE (Completeness):</span>
             <span className="text-zinc-200">{sourceStatus}</span>
           </div>
+
+          {assessment && (
+            <div className="p-2.5 rounded-lg bg-[#0d0d14] border border-zinc-800 md:col-span-2">
+              <span className="text-orange-400 block text-[10px] font-bold">
+                MANIPULATION ASSESSMENT (Likely Type):
+              </span>
+              <span className="text-zinc-200">
+                {assessment.headline} — {assessment.likelyTypeLabel} ({formatAssessedPct(assessment.confidence)} confidence)
+              </span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* MANIPULATION ASSESSMENT — carried into the forensic dossier */}
+      {assessment && <ManipulationAssessmentCard assessment={assessment} compact />}
 
       {/* FORENSIC PACKAGE ACTION AREA */}
       <div className="rounded-xl border border-purple-500/40 bg-purple-950/20 p-4 flex flex-col sm:flex-row items-center justify-between gap-4 font-mono text-xs shadow-md">

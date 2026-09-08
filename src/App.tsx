@@ -1,6 +1,6 @@
 /* Prototype authentication/storage only. Production deployment requires secure departmental identity, encryption, access control and audit logging. */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
@@ -20,9 +20,15 @@ import { Step5Report } from './components/Step5Report';
 import { FinalConnectedInvestigation } from './components/FinalConnectedInvestigation';
 import { CompactStepIndicator } from './components/CompactStepIndicator';
 import { DossierExportModal } from './components/DossierExportModal';
+import { ManipulationAssessmentCard } from './components/ManipulationAssessmentCard';
 import { InvestigationCompleteMoment } from './components/InvestigationCompleteMoment';
 import { BENCHMARK_CASES } from './data/benchmarkCases';
 import { buildCaseState } from './lib/caseStateBuilder';
+import {
+  formatAssessedPct,
+  getManipulationAssessment,
+  MANIPULATION_TYPE_SHORT,
+} from './lib/manipulationAssessment';
 import {
   DEMO_INVESTIGATOR,
   loadSavedCasesFromStorage,
@@ -40,6 +46,7 @@ import {
   TechnicalForensicMetrics,
 } from './types';
 import { soundFx } from './lib/soundFx';
+import { ThemeProvider } from './lib/themeContext';
 import { analyzeMedia, ApiError, toAnalyzeRequest } from './lib/api';
 import { prepareImageForModel } from './lib/imagePrep';
 
@@ -63,9 +70,17 @@ const EMPTY_INTAKE: MediaIntakeData = {
 
 type AppView = 'welcome' | 'login' | 'home' | 'profile' | 'investigation';
 
-export default function App() {
+function AppContent() {
   // Application-Level Navigation View
-  const [appView, setAppView] = useState<AppView>('welcome');
+  // Initialize from URL hash if present (e.g. #home, #login)
+  const getInitialView = (): AppView => {
+    const hash = window.location.hash.replace('#', '') as AppView;
+    const validViews: AppView[] = ['welcome', 'login', 'home', 'profile', 'investigation'];
+    // Only restore non-auth views from hash; auth-gated views need investigator state
+    if (hash === 'welcome' || hash === 'login') return hash;
+    return 'welcome';
+  };
+  const [appView, setAppView] = useState<AppView>(getInitialView);
 
   // Authenticated Investigator State
   const [investigator, setInvestigator] = useState<InvestigatorProfile | null>(null);
@@ -131,6 +146,74 @@ export default function App() {
     }, 2200);
   };
 
+  // =========================================================================
+  // BROWSER HISTORY NAVIGATION
+  // Syncs appView state with browser history for Back/Forward button support.
+  // =========================================================================
+  const isPopStateNavigation = useRef(false);
+
+  // Navigate to a new view, pushing a browser history entry
+  const navigate = useCallback((view: AppView, extraState?: Record<string, unknown>) => {
+    setAppView(view);
+    const state = { view, ...extraState };
+    window.history.pushState(state, '', `#${view}`);
+  }, []);
+
+  // Navigate back using browser history (used for "Back" buttons)
+  const navigateBack = useCallback(() => {
+    window.history.back();
+  }, []);
+
+  // Replace current history entry (used for logout to prevent forward-nav)
+  const navigateReplace = useCallback((view: AppView) => {
+    setAppView(view);
+    window.history.replaceState({ view }, '', `#${view}`);
+  }, []);
+
+  // Listen for browser Back/Forward button
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      isPopStateNavigation.current = true;
+      const state = event.state as { view?: AppView; activeCaseId?: string } | null;
+      if (state?.view) {
+        // For auth-gated views, check if investigator is still logged in
+        const authGatedViews: AppView[] = ['home', 'profile', 'investigation'];
+        if (authGatedViews.includes(state.view) && !investigator) {
+          // Can't restore auth-gated view without login, go to welcome
+          setAppView('welcome');
+          window.history.replaceState({ view: 'welcome' }, '', '#welcome');
+        } else {
+          setAppView(state.view);
+        }
+      } else {
+        // Fallback: parse from hash
+        const hash = window.location.hash.replace('#', '') as AppView;
+        const validViews: AppView[] = ['welcome', 'login', 'home', 'profile', 'investigation'];
+        if (validViews.includes(hash)) {
+          const authGatedViews: AppView[] = ['home', 'profile', 'investigation'];
+          if (authGatedViews.includes(hash) && !investigator) {
+            setAppView('welcome');
+            window.history.replaceState({ view: 'welcome' }, '', '#welcome');
+          } else {
+            setAppView(hash);
+          }
+        } else {
+          setAppView('welcome');
+        }
+      }
+      isPopStateNavigation.current = false;
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [investigator]);
+
+  // Set initial history entry on mount
+  useEffect(() => {
+    window.history.replaceState({ view: appView }, '', `#${appView}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Sync state changes to current investigator's saved cases
   const syncActiveCase = (
     updatedState: PersistentCaseState,
@@ -187,7 +270,7 @@ export default function App() {
   // --- NAVIGATION & AUTH ACTIONS ---
 
   const handleStartFromWelcome = () => {
-    setAppView('login');
+    navigate('login');
   };
 
   const handleLogin = (email: string, name?: string) => {
@@ -210,19 +293,20 @@ export default function App() {
     setInvestigator(profile);
     const initialCases = loadSavedCasesFromStorage(profile.id);
     setSavedCases(initialCases);
-    setAppView('home');
+    navigate('home');
   };
 
   const handleContinueDemo = () => {
     setInvestigator(DEMO_INVESTIGATOR);
     const initialCases = loadSavedCasesFromStorage(DEMO_INVESTIGATOR.id);
     setSavedCases(initialCases);
-    setAppView('home');
+    navigate('home');
   };
 
   const handleLogout = () => {
     setInvestigator(null);
-    setAppView('welcome');
+    // Use replaceState to prevent forward-navigating back to auth pages
+    navigateReplace('welcome');
   };
 
   // --- CASE WORKSPACE ACTIONS ---
@@ -233,7 +317,7 @@ export default function App() {
     setWorkflowStage(savedCase.workflowStage);
     setCompletedSteps(savedCase.completedSteps);
     setExpandedCompletedSteps(savedCase.expandedCompletedSteps || {});
-    setAppView('investigation');
+    navigate('investigation', { activeCaseId: savedCase.id });
   };
 
   const handleNewInvestigation = () => {
@@ -286,7 +370,7 @@ export default function App() {
     setWorkflowStage(1);
     setCompletedSteps([]);
     setExpandedCompletedSteps({});
-    setAppView('investigation');
+    navigate('investigation', { activeCaseId: newId });
   };
 
   // --- STEP COMPLETE HANDLERS ---
@@ -488,25 +572,28 @@ export default function App() {
     ...(isAssessed(caseState.investigation.originEcho)
       ? { origin_echo: caseState.investigation.originEcho }
       : {}),
+    /* Always present. The assessment reports its own inconclusive state
+     * rather than being omitted, so the dossier never goes silent about
+     * whether manipulation type was considered. */
+    manipulation_assessment: getManipulationAssessment(caseState),
   };
 
   return (
-    <div className="min-h-screen bg-[#06060a] text-zinc-100 font-sans selection:bg-purple-600 selection:text-white flex flex-col relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#06060a] text-zinc-100 font-sans selection:bg-purple-600 selection:text-white flex flex-col relative overflow-x-hidden transition-colors duration-200">
       {/* Ambient background glow */}
-      <div className="fixed top-0 left-1/4 w-[600px] h-[350px] bg-purple-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
-      <div className="fixed bottom-0 right-10 w-[450px] h-[300px] bg-blue-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="ambient-glow-purple fixed top-0 left-1/4 w-[600px] h-[350px] bg-purple-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="ambient-glow-blue fixed bottom-0 right-10 w-[450px] h-[300px] bg-blue-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
 
-      {/* COMPACT APPLICATION HEADER (Always shown once entered, or minimal on welcome) */}
-      {appView !== 'welcome' && (
-        <Navbar
-          caseId={appView === 'investigation' ? activeCaseId : undefined}
-          hasStartedCase={appView === 'investigation'}
-          onGoToCases={() => setAppView('home')}
-          onNewCase={handleNewInvestigation}
-          onGoToProfile={() => setAppView('profile')}
-          onLogout={handleLogout}
-        />
-      )}
+      {/* COMPACT APPLICATION HEADER (Always shown with top-right theme changer) */}
+      <Navbar
+        isWelcome={appView === 'welcome'}
+        caseId={appView === 'investigation' ? activeCaseId : undefined}
+        hasStartedCase={appView === 'investigation'}
+        onGoToCases={investigator ? () => navigate('home') : undefined}
+        onNewCase={investigator ? handleNewInvestigation : undefined}
+        onGoToProfile={investigator ? () => navigate('profile') : undefined}
+        onLogout={investigator ? handleLogout : undefined}
+      />
 
       {/* MAIN CONTAINER */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -530,7 +617,7 @@ export default function App() {
             cases={savedCases}
             onOpenCase={handleOpenCase}
             onNewInvestigation={handleNewInvestigation}
-            onViewProfile={() => setAppView('profile')}
+            onViewProfile={() => navigate('profile')}
           />
         )}
 
@@ -539,7 +626,7 @@ export default function App() {
           <InvestigatorProfileView
             investigator={investigator}
             cases={savedCases}
-            onBackToCases={() => setAppView('home')}
+            onBackToCases={() => navigateBack()}
             onNewInvestigation={handleNewInvestigation}
             onOpenCase={handleOpenCase}
           />
@@ -561,7 +648,7 @@ export default function App() {
                   {workflowStage >= 6 ? 'Dossier Sealed' : `Step ${Math.min(5, Math.floor(workflowStage))} in progress`}
                 </span>
                 <button
-                  onClick={() => setAppView('home')}
+                  onClick={() => navigateBack()}
                   className="text-purple-400 hover:text-purple-300 font-bold underline cursor-pointer"
                 >
                   ← Back to My Cases
@@ -703,23 +790,29 @@ export default function App() {
                     stepNumber={2}
                     stepTitle="Analysis Complete"
                     subtitle="Signals, Indicators &amp; Completeness Logged"
-                    badgeText={`${caseState.analysis.manipulation.manipulationConfidence}% CONFIDENCE`}
+                    badgeText={`${MANIPULATION_TYPE_SHORT[getManipulationAssessment(caseState).likelyType]} • ${formatAssessedPct(getManipulationAssessment(caseState).confidence)}`}
                     isExpanded={expandedCompletedSteps[2]}
                     onToggleExpand={() => toggleExpandedStep(2)}
                   >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-xs">
-                      <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-purple-400 font-bold block text-[10px]">Visual Signals</span>
-                        <span className="text-zinc-300 text-xs">
-                          Lighting: {caseState.analysis.visual.lightingConsistency} | Chromatic: {caseState.analysis.visual.chromaticAberration}
-                        </span>
+                    <div className="space-y-3 font-mono text-xs">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                          <span className="text-purple-400 font-bold block text-[10px]">Visual Signals</span>
+                          <span className="text-zinc-300 text-xs">
+                            Lighting: {caseState.analysis.visual.lightingConsistency} | Chromatic: {caseState.analysis.visual.chromaticAberration}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                          <span className="text-cyan-400 font-bold block text-[10px]">Structural &amp; Tampering</span>
+                          <span className="text-zinc-300 text-xs">
+                            {caseState.analysis.structural.compressionGenerations}x compression | Status: {caseState.analysis.manipulation.status}
+                          </span>
+                        </div>
                       </div>
-                      <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-cyan-400 font-bold block text-[10px]">Structural &amp; Tampering</span>
-                        <span className="text-zinc-300 text-xs">
-                          {caseState.analysis.structural.compressionGenerations}x compression | Status: {caseState.analysis.manipulation.status}
-                        </span>
-                      </div>
+                      <ManipulationAssessmentCard
+                        assessment={getManipulationAssessment(caseState)}
+                        compact
+                      />
                     </div>
                   </CompactStepIndicator>
                 )}
@@ -918,5 +1011,13 @@ export default function App() {
         intake={caseState.ingest}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }

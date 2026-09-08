@@ -17,7 +17,7 @@ export const StartScreen: React.FC<StartScreenProps> = ({ onStart }) => {
     <div className="min-h-[70vh] flex flex-col items-center justify-center text-center px-4">
       <div className="max-w-sm w-full space-y-7 flex flex-col items-center">
         {/* Logo */}
-        <div className="p-4 rounded-3xl bg-gradient-to-b from-zinc-900 to-black border border-zinc-800/80 shadow-2xl shadow-purple-950/30">
+        <div className="start-logo-box p-4 rounded-3xl bg-gradient-to-b from-zinc-900 to-black border border-zinc-800/80 shadow-2xl shadow-purple-950/30">
           <Logo size="xl" />
         </div>
 

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Logo } from './Logo';
 import { RotateCcw, FolderLock, User, LogOut, Volume2, VolumeX } from 'lucide-react';
 import { soundFx } from '../lib/soundFx';
+import { ThemeToggle } from './ThemeToggle';
 
 interface NavbarProps {
   caseId?: string;
@@ -10,6 +11,7 @@ interface NavbarProps {
   totalSteps?: number;
   workflowStage?: number;
   statusMessage?: string;
+  isWelcome?: boolean;
   onGoToCases?: () => void;
   onNewCase?: () => void;
   onGoToProfile?: () => void;
@@ -23,6 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   totalSteps = 5,
   workflowStage = 1,
   statusMessage,
+  isWelcome = false,
   onGoToCases,
   onNewCase,
   onGoToProfile,
@@ -38,6 +41,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     const newState = soundFx.toggleMute();
     setSoundEnabled(newState);
   };
+
   // Determine contextual status line if not explicitly passed
   const getContextualStatus = () => {
     if (statusMessage) return statusMessage;
@@ -61,12 +65,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   const stepDisplayNum = Math.min(5, Math.max(1, Math.floor(currentStep)));
 
   return (
-    <header className="border-b border-zinc-800/80 bg-[#06060a]/95 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-2.5">
+    <header className="border-b border-zinc-800/80 bg-[#06060a]/95 backdrop-blur-md sticky top-0 z-40 px-4 sm:px-6 py-2.5 transition-colors">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
         {/* Brand Group & Contextual Status */}
         <div
           onClick={onGoToCases}
-          className="flex items-center gap-3 cursor-pointer hover:opacity-90 transition-opacity"
+          className={`flex items-center gap-3 transition-opacity ${
+            onGoToCases ? 'cursor-pointer hover:opacity-90' : 'cursor-default'
+          }`}
         >
           <div className="hover:scale-105 transition-transform">
             <Logo size="sm" />
@@ -93,9 +99,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Right Action Bar & Case Progress Indicator */}
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-2.5">
           {caseId && hasStartedCase && (
-            <div className="flex items-center gap-2 text-xs font-mono text-zinc-400 bg-zinc-950 border border-zinc-800 px-3 py-1 rounded-lg">
+            <div className="hidden md:flex items-center gap-2 text-xs font-mono text-zinc-400 bg-zinc-950 border border-zinc-800 px-3 py-1 rounded-lg">
               <span>
                 CASE <strong className="text-purple-300">#{caseId}</strong>
               </span>
@@ -109,6 +115,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
           )}
+
+          {/* Theme Changer Toggle (☀️ Light / 🌙 Dark) */}
+          <ThemeToggle />
 
           {/* Sound Effect Toggle */}
           <button
@@ -126,12 +135,12 @@ export const Navbar: React.FC<NavbarProps> = ({
             ) : (
               <VolumeX className="w-3.5 h-3.5 text-zinc-500" />
             )}
-            <span className="hidden md:inline text-[10px]">
+            <span className="hidden lg:inline text-[10px]">
               {soundEnabled ? 'SOUND ON' : 'MUTED'}
             </span>
           </button>
 
-          {onGoToCases && (
+          {!isWelcome && onGoToCases && (
             <button
               onClick={onGoToCases}
               id="nav-btn-my-cases"
@@ -143,7 +152,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {onNewCase && (
+          {!isWelcome && onNewCase && (
             <button
               onClick={onNewCase}
               id="nav-btn-new-case"
@@ -151,11 +160,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               title="Start a new investigation"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>NEW CASE</span>
+              <span className="hidden xs:inline">NEW CASE</span>
             </button>
           )}
 
-          {onGoToProfile && (
+          {!isWelcome && onGoToProfile && (
             <button
               onClick={onGoToProfile}
               id="nav-btn-profile"
@@ -167,7 +176,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          {onLogout && (
+          {!isWelcome && onLogout && (
             <button
               onClick={onLogout}
               id="nav-btn-logout"
