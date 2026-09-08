@@ -530,7 +530,13 @@ function AppContent() {
       primary_hash_sha256: caseState.ingest.fileHashSha256,
       verdict_summary: caseState.investigation.contextCheck.summary,
     },
-    the_five_questions: caseState.report.digitalCrimeScene,
+    the_five_questions: {
+      who: caseState.report.digitalCrimeScene.who,
+      where: caseState.report.digitalCrimeScene.where,
+      when: caseState.report.digitalCrimeScene.when,
+      what_changed: caseState.report.digitalCrimeScene.what,
+      how_it_spread: caseState.report.digitalCrimeScene.how,
+    },
     forensic_replay_timeline: caseState.investigation.forensicReplay,
     context_integrity_check: {
       raw_media_status: caseState.investigation.contextCheck.rawMediaStatus,
