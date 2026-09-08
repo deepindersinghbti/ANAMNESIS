@@ -8,12 +8,14 @@ import {
   AlertTriangle,
   AudioWaveform,
 } from 'lucide-react';
+import { useTheme } from '../lib/themeContext';
 
 interface AudioForensicLabProps {
   status: string;
 }
 
 export const AudioForensicLab: React.FC<AudioForensicLabProps> = ({ status }) => {
+  const { theme } = useTheme();
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackPos, setPlaybackPos] = useState(35); // 0-100%
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -27,12 +29,13 @@ export const AudioForensicLab: React.FC<AudioForensicLabProps> = ({ status }) =>
 
     const width = (canvas.width = canvas.parentElement?.clientWidth || 700);
     const height = (canvas.height = 140);
+    const isLightMode = theme === 'light';
 
-    ctx.fillStyle = '#06060c';
+    ctx.fillStyle = isLightMode ? '#f8fafc' : '#06060c';
     ctx.fillRect(0, 0, width, height);
 
     // Draw baseline grid
-    ctx.strokeStyle = '#1a1a2b';
+    ctx.strokeStyle = isLightMode ? '#e2e8f0' : '#1a1a2b';
     ctx.lineWidth = 1;
     for (let y = 20; y < height; y += 30) {
       ctx.beginPath();
@@ -65,7 +68,7 @@ export const AudioForensicLab: React.FC<AudioForensicLabProps> = ({ status }) =>
         const ratio = i / Math.max(1, (playbackPos / 100) * bars);
         ctx.fillStyle = ratio < 0.33 ? '#3b82f6' : ratio < 0.66 ? '#ec4899' : '#f97316';
       } else {
-        ctx.fillStyle = '#262638'; // Dark unplayed
+        ctx.fillStyle = isLightMode ? '#cbd5e1' : '#262638'; // Unplayed
       }
 
       ctx.fillRect(x, y, 2.5, barHeight);
@@ -89,7 +92,7 @@ export const AudioForensicLab: React.FC<AudioForensicLabProps> = ({ status }) =>
     ctx.lineTo(splicePixelX, height);
     ctx.stroke();
     ctx.setLineDash([]);
-  }, [playbackPos]);
+  }, [playbackPos, theme]);
 
   useEffect(() => {
     let interval: any;

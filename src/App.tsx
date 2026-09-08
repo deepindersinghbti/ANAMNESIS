@@ -36,10 +36,11 @@ import {
   SavedCase,
 } from './types';
 import { soundFx } from './lib/soundFx';
+import { ThemeProvider } from './lib/themeContext';
 
 type AppView = 'welcome' | 'login' | 'home' | 'profile' | 'investigation';
 
-export default function App() {
+function AppContent() {
   // Application-Level Navigation View
   // Initialize from URL hash if present (e.g. #home, #login)
   const getInitialView = (): AppView => {
@@ -551,22 +552,21 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#06060a] text-zinc-100 font-sans selection:bg-purple-600 selection:text-white flex flex-col relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#06060a] text-zinc-100 font-sans selection:bg-purple-600 selection:text-white flex flex-col relative overflow-x-hidden transition-colors duration-200">
       {/* Ambient background glow */}
-      <div className="fixed top-0 left-1/4 w-[600px] h-[350px] bg-purple-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
-      <div className="fixed bottom-0 right-10 w-[450px] h-[300px] bg-blue-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="ambient-glow-purple fixed top-0 left-1/4 w-[600px] h-[350px] bg-purple-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
+      <div className="ambient-glow-blue fixed bottom-0 right-10 w-[450px] h-[300px] bg-blue-900/10 rounded-full blur-[140px] pointer-events-none -z-10" />
 
-      {/* COMPACT APPLICATION HEADER (Always shown once entered, or minimal on welcome) */}
-      {appView !== 'welcome' && (
-        <Navbar
-          caseId={appView === 'investigation' ? activeCaseId : undefined}
-          hasStartedCase={appView === 'investigation'}
-          onGoToCases={() => navigate('home')}
-          onNewCase={handleNewInvestigation}
-          onGoToProfile={() => navigate('profile')}
-          onLogout={handleLogout}
-        />
-      )}
+      {/* COMPACT APPLICATION HEADER (Always shown with top-right theme changer) */}
+      <Navbar
+        isWelcome={appView === 'welcome'}
+        caseId={appView === 'investigation' ? activeCaseId : undefined}
+        hasStartedCase={appView === 'investigation'}
+        onGoToCases={investigator ? () => navigate('home') : undefined}
+        onNewCase={investigator ? handleNewInvestigation : undefined}
+        onGoToProfile={investigator ? () => navigate('profile') : undefined}
+        onLogout={investigator ? handleLogout : undefined}
+      />
 
       {/* MAIN CONTAINER */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
@@ -928,5 +928,13 @@ export default function App() {
         intake={caseState.ingest}
       />
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 }
