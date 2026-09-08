@@ -21,6 +21,8 @@ import {
 import { PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
+import { ManipulationCarryForward } from './ManipulationAssessmentCard';
+import { getManipulationAssessment } from '../lib/manipulationAssessment';
 import { soundFx } from '../lib/soundFx';
 
 interface Step4InvestigateProps {
@@ -34,6 +36,7 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
 }) => {
   const { ingest, investigation } = caseState;
   const { forensicReplay, originEcho, contextCheck } = investigation;
+  const manipulationAssessment = getManipulationAssessment(caseState);
 
   const [activeSection, setActiveSection] = useState<'replay' | 'origin_echo' | 'context_check'>('replay');
   const [activeStageIdx, setActiveStageIdx] = useState<number>(0);
@@ -179,6 +182,12 @@ export const Step4Investigate: React.FC<Step4InvestigateProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Manipulation finding carried into replay & Origin Echo reasoning */}
+      <ManipulationCarryForward
+        assessment={manipulationAssessment}
+        context="Carried forward from ANALYSE"
+      />
 
       {/* SECTION A: FORENSIC REPLAY */}
       {activeSection === 'replay' && (

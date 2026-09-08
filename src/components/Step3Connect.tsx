@@ -14,6 +14,8 @@ import {
 import { PersistentCaseState } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
+import { ManipulationCarryForward } from './ManipulationAssessmentCard';
+import { getManipulationAssessment } from '../lib/manipulationAssessment';
 import { soundFx } from '../lib/soundFx';
 
 interface Step3ConnectProps {
@@ -26,6 +28,7 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
   onComplete,
 }) => {
   const { ingest, relationships } = caseState;
+  const manipulationAssessment = getManipulationAssessment(caseState);
   const targetCount = relationships.totalRelatedFound || 14;
 
   // Requirement 2: Related media discovery animation (0 -> 3 -> 7 -> 11 -> 14)
@@ -141,6 +144,12 @@ export const Step3Connect: React.FC<Step3ConnectProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Manipulation finding carried into lineage analysis */}
+      <ManipulationCarryForward
+        assessment={manipulationAssessment}
+        context="Carried forward from ANALYSE"
+      />
 
       {/* GRAPH HIERARCHY & NODE INSPECTION */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">

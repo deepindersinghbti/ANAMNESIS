@@ -20,9 +20,14 @@ import { Step5Report } from './components/Step5Report';
 import { FinalConnectedInvestigation } from './components/FinalConnectedInvestigation';
 import { CompactStepIndicator } from './components/CompactStepIndicator';
 import { DossierExportModal } from './components/DossierExportModal';
+import { ManipulationAssessmentCard } from './components/ManipulationAssessmentCard';
 import { InvestigationCompleteMoment } from './components/InvestigationCompleteMoment';
 import { BENCHMARK_CASES } from './data/benchmarkCases';
 import { buildCaseState } from './lib/caseStateBuilder';
+import {
+  getManipulationAssessment,
+  MANIPULATION_TYPE_SHORT,
+} from './lib/manipulationAssessment';
 import {
   DEMO_INVESTIGATOR,
   loadSavedCasesFromStorage,
@@ -555,6 +560,7 @@ function AppContent() {
       shadow_sun_angle_match: 'Matched',
     },
     origin_echo: caseState.investigation.originEcho,
+    manipulation_assessment: getManipulationAssessment(caseState),
   };
 
   return (
@@ -719,23 +725,29 @@ function AppContent() {
                     stepNumber={2}
                     stepTitle="Analysis Complete"
                     subtitle="Signals, Indicators &amp; Completeness Logged"
-                    badgeText={`${caseState.analysis.manipulation.manipulationConfidence}% CONFIDENCE`}
+                    badgeText={`${MANIPULATION_TYPE_SHORT[getManipulationAssessment(caseState).likelyType]} • ${getManipulationAssessment(caseState).confidence}%`}
                     isExpanded={expandedCompletedSteps[2]}
                     onToggleExpand={() => toggleExpandedStep(2)}
                   >
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 font-mono text-xs">
-                      <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-purple-400 font-bold block text-[10px]">Visual Signals</span>
-                        <span className="text-zinc-300 text-xs">
-                          Lighting: {caseState.analysis.visual.lightingConsistency} | Chromatic: {caseState.analysis.visual.chromaticAberration}
-                        </span>
+                    <div className="space-y-3 font-mono text-xs">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                          <span className="text-purple-400 font-bold block text-[10px]">Visual Signals</span>
+                          <span className="text-zinc-300 text-xs">
+                            Lighting: {caseState.analysis.visual.lightingConsistency} | Chromatic: {caseState.analysis.visual.chromaticAberration}
+                          </span>
+                        </div>
+                        <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
+                          <span className="text-cyan-400 font-bold block text-[10px]">Structural &amp; Tampering</span>
+                          <span className="text-zinc-300 text-xs">
+                            {caseState.analysis.structural.compressionGenerations}x compression | Status: {caseState.analysis.manipulation.status}
+                          </span>
+                        </div>
                       </div>
-                      <div className="p-2.5 rounded-lg bg-zinc-950 border border-zinc-800">
-                        <span className="text-cyan-400 font-bold block text-[10px]">Structural &amp; Tampering</span>
-                        <span className="text-zinc-300 text-xs">
-                          {caseState.analysis.structural.compressionGenerations}x compression | Status: {caseState.analysis.manipulation.status}
-                        </span>
-                      </div>
+                      <ManipulationAssessmentCard
+                        assessment={getManipulationAssessment(caseState)}
+                        compact
+                      />
                     </div>
                   </CompactStepIndicator>
                 )}

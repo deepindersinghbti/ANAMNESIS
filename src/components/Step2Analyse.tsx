@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Eye,
   Volume2,
@@ -21,6 +21,15 @@ import {
 import { PersistentCaseState, SourceCompletenessData } from '../types';
 import { ConfidenceIndicator } from './ConfidenceIndicator';
 import { WhyThisMatters } from './WhyThisMatters';
+import {
+  ManipulationAssessmentCard,
+  ManipulationScopeNote,
+} from './ManipulationAssessmentCard';
+import {
+  deriveManipulationAssessment,
+  MANIPULATION_TYPE_SHORT,
+  manipulationTypeTheme,
+} from '../lib/manipulationAssessment';
 import { soundFx } from '../lib/soundFx';
 
 interface Step2AnalyseProps {
@@ -63,12 +72,46 @@ export const Step2Analyse: React.FC<Step2AnalyseProps> = ({
     currentSC.originalProvided ? 'master_camera_raw_0100.mp4' : null
   );
 
+  /**
+   * Manipulation Type Assessment — re-derived from the live case state so it
+   * always reflects the current source-completeness evidence. Falls back to the
+   * value stored at ingest time for cases saved before this feature existed.
+   */
+  const assessment = useMemo(
+    () =>
+      deriveManipulationAssessment({
+        ...caseState,
+        analysis: { ...caseState.analysis, sourceCompleteness: currentSC },
+      }),
+    [caseState, currentSC]
+  );
+  const assessmentTheme = manipulationTypeTheme(assessment.likelyType);
+
   // Play subtle warning tone on mount for possible extracted clip
   useEffect(() => {
     if (currentSC.possibleExtractedClip) {
       soundFx.playSourceCompletenessWarning();
     }
   }, []);
+
+  /**
+   * Source completeness feeds directly into the manipulation assessment, so any
+   * change to it re-derives the assessment before the case state is persisted.
+   */
+  const commitSourceCompleteness = (updatedSC: SourceCompletenessData) => {
+    if (!onUpdateCaseState) return;
+
+    const nextState: PersistentCaseState = {
+      ...caseState,
+      analysis: {
+        ...caseState.analysis,
+        sourceCompleteness: updatedSC,
+      },
+    };
+    nextState.analysis.manipulationAssessment = deriveManipulationAssessment(nextState);
+
+    onUpdateCaseState(nextState);
+  };
 
   const handleToggleFlag = () => {
     const newFlagStatus = !isFlagged;
@@ -78,66 +121,39 @@ export const Step2Analyse: React.FC<Step2AnalyseProps> = ({
       soundFx.playInvestigativeLeadConfirm();
     }
 
-    if (onUpdateCaseState) {
-      const updatedSC: SourceCompletenessData = {
-        ...currentSC,
-        investigativeFlag: newFlagStatus,
-        originalProvided,
-      };
-      onUpdateCaseState({
-        ...caseState,
-        analysis: {
-          ...caseState.analysis,
-          sourceCompleteness: updatedSC,
-        },
-      });
-    }
+    commitSourceCompleteness({
+      ...currentSC,
+      investigativeFlag: newFlagStatus,
+      originalProvided,
+    });
   };
 
   const handleProvideOriginal = (fileName: string = 'master_camera_raw_0100.mp4') => {
     setOriginalProvided(true);
     setUploadedFileName(fileName);
 
-    if (onUpdateCaseState) {
-      const updatedSC: SourceCompletenessData = {
-        ...currentSC,
-        originalProvided: true,
-        comparison: {
-          originalDuration: '01:00.0',
-          submittedClipTiming: '00:17.2 – 00:29.6',
-          extractedSegment: '00:17.2 – 00:29.6',
-          omittedPortions: ['00:00.0 – 00:17.2 (Prior Context)', '00:29.6 – 01:00.0 (Subsequent Context)'],
-          matchStatus: '🟢 SOURCE MATCH — CONFIRMED',
-        },
-      };
-      onUpdateCaseState({
-        ...caseState,
-        analysis: {
-          ...caseState.analysis,
-          sourceCompleteness: updatedSC,
-        },
-      });
-    }
+    commitSourceCompleteness({
+      ...currentSC,
+      originalProvided: true,
+      comparison: {
+        originalDuration: '01:00.0',
+        submittedClipTiming: '00:17.2 – 00:29.6',
+        extractedSegment: '00:17.2 – 00:29.6',
+        omittedPortions: ['00:00.0 – 00:17.2 (Prior Context)', '00:29.6 – 01:00.0 (Subsequent Context)'],
+        matchStatus: '🟢 SOURCE MATCH — CONFIRMED',
+      },
+    });
   };
 
   const handleRemoveOriginal = () => {
     setOriginalProvided(false);
     setUploadedFileName(null);
 
-    if (onUpdateCaseState) {
-      const updatedSC: SourceCompletenessData = {
-        ...currentSC,
-        originalProvided: false,
-        comparison: undefined,
-      };
-      onUpdateCaseState({
-        ...caseState,
-        analysis: {
-          ...caseState.analysis,
-          sourceCompleteness: updatedSC,
-        },
-      });
-    }
+    commitSourceCompleteness({
+      ...currentSC,
+      originalProvided: false,
+      comparison: undefined,
+    });
   };
 
   return (
@@ -160,26 +176,35 @@ export const Step2Analyse: React.FC<Step2AnalyseProps> = ({
       </div>
 
       {/* 3-SECOND KEY FINDING BANNER */}
-      <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+      <div className={`p-4 rounded-xl ${assessmentTheme.panel} border ${assessmentTheme.border} flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md`}>
         <div className="space-y-1">
-          <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-amber-400 block">
+          <span className={`text-[10px] font-mono font-bold uppercase tracking-widest ${assessmentTheme.accent} block`}>
             KEY FINDING
           </span>
           <h3 className="text-base sm:text-lg font-black font-mono text-white">
-            Possible manipulation detected — {analysis.manipulation.manipulationConfidence}% confidence
+            {assessment.headline} — {assessment.confidence}% confidence
           </h3>
           <p className="text-xs text-zinc-300 font-sans">
-            Abrupt boundary indicators suggest <span className="text-amber-300 font-bold">Possible extracted clip</span> ({currentSC.submittedDuration || '12.4s'}). Full master source unverified.
+            Likely type:{' '}
+            <span className={`${assessmentTheme.text} font-bold`}>{assessment.likelyTypeLabel}</span>
+            {currentSC.possibleExtractedClip && !currentSC.originalProvided ? (
+              <>
+                {' '}• Possible extracted clip ({currentSC.submittedDuration || '12.4s'}). Full master source unverified.
+              </>
+            ) : null}
           </p>
         </div>
         <div className="shrink-0 flex items-center gap-2">
-          <ConfidenceIndicator score={analysis.manipulation.manipulationConfidence} />
-          <span className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-amber-950 border border-amber-600 text-amber-300 flex items-center gap-1.5">
+          <ConfidenceIndicator score={assessment.confidence} />
+          <span className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border flex items-center gap-1.5 ${assessmentTheme.badge}`}>
             <AlertTriangle className="w-3.5 h-3.5" />
-            <span>🟠 {analysis.manipulation.status}</span>
+            <span>{MANIPULATION_TYPE_SHORT[assessment.likelyType]}</span>
           </span>
         </div>
       </div>
+
+      {/* Manipulated is not the same thing as AI-generated */}
+      <ManipulationScopeNote />
 
       {/* 4 CORE EVIDENCE SIGNAL CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 font-mono text-xs">
@@ -408,6 +433,9 @@ export const Step2Analyse: React.FC<Step2AnalyseProps> = ({
           )}
         </div>
       </div>
+
+      {/* MEDIA MANIPULATION ASSESSMENT (AI-based vs conventional / manual) */}
+      <ManipulationAssessmentCard assessment={assessment} enableReveal />
 
       {/* Complete Step 2 Action */}
       <div className="flex items-center justify-between pt-3 border-t border-zinc-800">

@@ -123,6 +123,98 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
       doc.text(`- Audio Stream Integrity: ${report.context_integrity_check.audio_integrity_status}`, 14, yPos);
       yPos += 10;
 
+      // Manipulation Assessment (AI-based vs conventional / manual editing)
+      const ma = report.manipulation_assessment;
+      if (ma) {
+        if (yPos > 220) {
+          doc.addPage();
+          yPos = 20;
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.text('MANIPULATION ASSESSMENT (AI-ASSISTED):', 14, yPos);
+        yPos += 7;
+
+        doc.setFont('courier', 'normal');
+        doc.setFontSize(9);
+        const detectedText =
+          ma.manipulationDetected === 'inconclusive'
+            ? 'INCONCLUSIVE - ADDITIONAL EVIDENCE REQUIRED'
+            : ma.manipulationDetected
+            ? 'MANIPULATION DETECTED'
+            : 'NO SIGNIFICANT MANIPULATION DETECTED';
+        doc.text(`- Status: ${detectedText}`, 14, yPos);
+        yPos += 5;
+        doc.text(`- Likely manipulation type: ${ma.likelyTypeLabel}`, 14, yPos);
+        yPos += 5;
+        doc.text(`- Family: ${ma.likelyType} (AI-based / conventional / mixed / inconclusive)`, 14, yPos);
+        yPos += 5;
+        doc.text(`- Confidence: ${ma.confidence}%`, 14, yPos);
+        yPos += 5;
+        doc.text(
+          `- AI-based signal: ${ma.aiSignalStrength}%  |  Conventional signal: ${ma.conventionalSignalStrength}%`,
+          14,
+          yPos
+        );
+        yPos += 7;
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Indicators detected:', 14, yPos);
+        yPos += 5;
+
+        doc.setFont('helvetica', 'normal');
+        if (ma.indicators.length === 0) {
+          doc.text('- None. No significant indicators identified in the available evidence.', 16, yPos);
+          yPos += 5;
+        } else {
+          ma.indicators.forEach((indicator) => {
+            if (yPos > 268) {
+              doc.addPage();
+              yPos = 20;
+            }
+            const tag =
+              indicator.category === 'ai'
+                ? '[AI]'
+                : indicator.category === 'conventional'
+                ? '[MANUAL]'
+                : '[NEUTRAL]';
+            const line = doc.splitTextToSize(`- ${tag} ${indicator.label}: ${indicator.detail}`, pageWidth - 32);
+            doc.text(line, 16, yPos);
+            yPos += line.length * 5;
+          });
+        }
+        yPos += 3;
+
+        if (yPos > 250) {
+          doc.addPage();
+          yPos = 20;
+        }
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(9);
+        doc.text('Important limitations:', 14, yPos);
+        yPos += 5;
+
+        doc.setFont('helvetica', 'normal');
+        ma.limitations.forEach((limitation) => {
+          if (yPos > 268) {
+            doc.addPage();
+            yPos = 20;
+          }
+          const line = doc.splitTextToSize(`- ${limitation}`, pageWidth - 32);
+          doc.text(line, 16, yPos);
+          yPos += line.length * 5;
+        });
+
+        yPos += 2;
+        doc.setFont('courier', 'bold');
+        doc.setFontSize(8);
+        const labelLine = doc.splitTextToSize(ma.assessmentLabel, pageWidth - 28);
+        doc.text(labelLine, 14, yPos);
+        yPos += labelLine.length * 4 + 8;
+      }
+
       // Investigator Notes
       if (yPos > 240) {
         doc.addPage();
@@ -280,10 +372,92 @@ export const DossierExportModal: React.FC<DossierExportModalProps> = ({
             </div>
           </div>
 
+          {/* Manipulation Assessment */}
+          {report.manipulation_assessment && (
+            <div className="space-y-2">
+              <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">
+                4. Manipulation Assessment (AI-assisted)
+              </span>
+
+              <div className="p-4 rounded-2xl bg-[#06060c] border border-amber-900/50 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                  <div className="p-2.5 rounded-xl bg-[#0c0c16] border border-zinc-800">
+                    <span className="text-zinc-400 block text-[10px]">Status:</span>
+                    <span className="font-bold text-zinc-100">
+                      {report.manipulation_assessment.headline}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#0c0c16] border border-zinc-800">
+                    <span className="text-zinc-400 block text-[10px]">Likely manipulation type:</span>
+                    <span className="font-bold text-amber-300">
+                      {report.manipulation_assessment.likelyTypeLabel}
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#0c0c16] border border-zinc-800">
+                    <span className="text-zinc-400 block text-[10px]">Confidence:</span>
+                    <span className="font-bold text-zinc-100">
+                      {report.manipulation_assessment.confidence}%
+                    </span>
+                  </div>
+                  <div className="p-2.5 rounded-xl bg-[#0c0c16] border border-zinc-800">
+                    <span className="text-zinc-400 block text-[10px]">Signal split:</span>
+                    <span className="font-bold text-zinc-100">
+                      AI {report.manipulation_assessment.aiSignalStrength}% | Conventional{' '}
+                      {report.manipulation_assessment.conventionalSignalStrength}%
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-zinc-400 block text-[10px] uppercase font-bold">
+                    Indicators detected:
+                  </span>
+                  {report.manipulation_assessment.indicators.length > 0 ? (
+                    <ul className="space-y-0.5 text-[11px] text-zinc-200 font-sans">
+                      {report.manipulation_assessment.indicators.map((indicator, i) => (
+                        <li key={i}>
+                          <span className="font-mono text-[10px] text-zinc-400">
+                            [
+                            {indicator.category === 'ai'
+                              ? 'AI'
+                              : indicator.category === 'conventional'
+                              ? 'MANUAL'
+                              : 'NEUTRAL'}
+                            ]
+                          </span>{' '}
+                          <strong>{indicator.label}</strong> &mdash; {indicator.detail}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[11px] text-zinc-200 font-sans">
+                      No significant indicators identified in the available evidence.
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <span className="text-zinc-400 block text-[10px] uppercase font-bold">
+                    Important limitations:
+                  </span>
+                  <ul className="space-y-0.5 text-[11px] text-zinc-300 font-sans">
+                    {report.manipulation_assessment.limitations.map((limitation, i) => (
+                      <li key={i}>&bull; {limitation}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <p className="text-[10px] text-zinc-400 pt-2 border-t border-zinc-800">
+                  {report.manipulation_assessment.assessmentLabel}
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Actionable Investigator Notes */}
           <div className="space-y-1.5 p-4 rounded-2xl bg-[#06060c] border border-zinc-800">
             <span className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider block">
-              4. Actionable Next Steps &amp; Forensic Leads
+              5. Actionable Next Steps &amp; Forensic Leads
             </span>
             <p className="text-zinc-200 leading-relaxed font-sans">
               {report.investigator_notes}

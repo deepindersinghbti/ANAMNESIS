@@ -4,6 +4,7 @@ import {
   PersistentCaseState,
   StandardEvidenceStatus,
 } from '../types';
+import { deriveManipulationAssessment } from './manipulationAssessment';
 
 export function buildCaseState(
   intake: MediaIntakeData,
@@ -37,7 +38,7 @@ export function buildCaseState(
       ? '🟠 NEEDS VERIFICATION'
       : '🟢 OBSERVED / CONSISTENT';
 
-  return {
+  const state: PersistentCaseState = {
     ingest: intake,
     analysis: {
       visual: {
@@ -218,4 +219,10 @@ export function buildCaseState(
       },
     },
   };
+
+  // Manipulation Type Assessment is derived from the signals assembled above
+  // (transformations, synthetic probability, structure, source completeness).
+  state.analysis.manipulationAssessment = deriveManipulationAssessment(state);
+
+  return state;
 }
